@@ -27,10 +27,8 @@ mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB connected"))
   .catch((err) => console.error("MongoDB error:", err));
-
 app.use("/auth", authRouter);
 app.use("/twilio", twilioRouter); // Remove verifyToken to match old server.js
 app.use("/dial", verifyToken, dialRouter);
-
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`Server on port ${port}`));
