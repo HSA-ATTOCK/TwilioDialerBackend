@@ -100,6 +100,7 @@ router.post("/conference", async (req, res) => {
   });
   res.json({ success: true });
 });
+
 // Join Conference TwiML
 router.post("/join-conference", (req, res) => {
   const vr = new twilio.twiml.VoiceResponse();
@@ -107,4 +108,5 @@ router.post("/join-conference", (req, res) => {
   vr.dial().conference(room);
   res.type("text/xml").send(vr.toString());
 });
+
 module.exports = router;
