@@ -4,21 +4,42 @@ const User = require("../models/User");
 const router = express.Router();
 
 // Middleware to verify JWT and activeToken (add to protected routes)
+// Middleware to verify JWT and activeToken (add to protected routes)
 const verifyToken = async (req, res, next) => {
+  console.log("=== VERIFY TOKEN MIDDLEWARE ===");
+  console.log("Authorization header:", req.headers.authorization);
+
   const token = req.headers.authorization?.split(" ")[1]; // Bearer token
-  if (!token) return res.status(401).json({ error: "No token" });
+  console.log("Extracted token:", token);
+
+  if (!token) {
+    console.log("No token provided");
+    return res.status(401).json({ error: "No token" });
+  }
 
   try {
+    console.log("Verifying token with JWT_SECRET...");
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("Token decoded:", decoded);
+
+    console.log("Looking up user with ID:", decoded.id);
     const user = await User.findById(decoded.id);
+    console.log("User found:", user ? user.username : "null");
+    console.log("User active token:", user?.activeToken);
+    console.log("Token match:", user?.activeToken === token);
+
     if (!user || user.activeToken !== token) {
+      console.log("User not found or token mismatch");
       return res
         .status(401)
         .json({ error: "Invalid or expired session. Login again." });
     }
+
+    console.log("Token verification successful for user:", user.username);
     req.user = user;
     next();
   } catch (e) {
+    console.error("Token verification error:", e);
     res.status(401).json({ error: "Token error" });
   }
 };
@@ -79,6 +100,7 @@ router.post("/create-user", verifyToken, async (req, res) => {
       .status(400)
       .json({ error: "Invalid username: 3-20 alphanumeric characters." });
   }
+
   const newUser = new User({
     username,
     password,
@@ -88,12 +110,14 @@ router.post("/create-user", verifyToken, async (req, res) => {
   await newUser.save();
   res.json({ success: true });
 });
+
 // Logout (clear activeToken)
 router.post("/logout", verifyToken, async (req, res) => {
   req.user.activeToken = null;
   await req.user.save();
   res.json({ success: true });
 });
+
 // Add verifyToken to other routes like /dial/*, /twilio/*
 // Example: router.get('/reports', verifyToken, async (req, res) => { ... });
 
