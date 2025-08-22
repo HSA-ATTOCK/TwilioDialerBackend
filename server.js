@@ -29,7 +29,7 @@ mongoose
   .catch((err) => console.error("MongoDB error:", err));
 
 app.use("/auth", authRouter);
-app.use("/twilio", verifyToken, twilioRouter);
+app.use("/twilio", twilioRouter); // Remove verifyToken to match old server.js
 app.use("/dial", verifyToken, dialRouter);
 
 const port = process.env.PORT || 5000;
