@@ -23,6 +23,12 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
+// Verify token and return role
+router.get("/verify", verifyToken, (req, res) => {
+  // Respond with the role from the authenticated user
+  res.json({ role: req.user.role });
+});
+
 // Login (with validation and single session)
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
@@ -74,8 +80,6 @@ router.post("/create-user", verifyToken, async (req, res) => {
       .json({ error: "Invalid username: 3-20 alphanumeric characters." });
   }
 
-  // Password validation handled in model pre-save
-
   const newUser = new User({
     username,
     password,
@@ -92,13 +96,6 @@ router.post("/logout", verifyToken, async (req, res) => {
   await req.user.save();
   res.json({ success: true });
 });
-
-// router.post("/register-owner", async (req, res) => {
-//   const { username, password } = req.body;
-//   const user = new User({ username, password, role: "owner" });
-//   await user.save();
-//   res.json({ success: true });
-// });
 
 // Add verifyToken to other routes like /dial/*, /twilio/*
 // Example: router.get('/reports', verifyToken, async (req, res) => { ... });
