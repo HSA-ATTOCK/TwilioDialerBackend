@@ -54,7 +54,7 @@ router.get("/access-token", (req, res) => {
     });
     token.addGrant(voiceGrant);
     const jwtToken = token.toJwt();
-    console.log("Generated access token:", jwtToken);
+    console.log("Generated access token:", jwtToken); // Log only on generation
     res.json({ token: jwtToken });
   } catch (e) {
     console.error("Token generation failed:", e.message);
