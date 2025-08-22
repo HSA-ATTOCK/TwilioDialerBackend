@@ -37,14 +37,15 @@ router.get("/health", (req, res) => {
 router.get("/access-token", (req, res) => {
   try {
     console.log("Env vars:", {
+      TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID,
       TWILIO_API_KEY: process.env.TWILIO_API_KEY,
       TWILIO_API_SECRET: process.env.TWILIO_API_SECRET,
       TWILIO_TWIML_APP_SID: process.env.TWILIO_TWIML_APP_SID,
     });
     const token = new AccessToken(
+      process.env.TWILIO_ACCOUNT_SID,
       process.env.TWILIO_API_KEY,
       process.env.TWILIO_API_SECRET,
-      null,
       { identity: "browser", ttl: 3600 }
     );
     const voiceGrant = new VoiceGrant({
