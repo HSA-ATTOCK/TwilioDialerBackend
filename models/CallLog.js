@@ -30,5 +30,4 @@ const callLogSchema = new mongoose.Schema({
   endedBy: String, // Who ended (agent, client, etc.)
   auditAction: String, // e.g., "Call Started", "Disposition Set"
 });
-
 module.exports = mongoose.model("CallLog", callLogSchema);
