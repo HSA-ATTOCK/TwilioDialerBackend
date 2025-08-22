@@ -79,7 +79,6 @@ router.post("/create-user", verifyToken, async (req, res) => {
       .status(400)
       .json({ error: "Invalid username: 3-20 alphanumeric characters." });
   }
-
   const newUser = new User({
     username,
     password,
@@ -89,14 +88,12 @@ router.post("/create-user", verifyToken, async (req, res) => {
   await newUser.save();
   res.json({ success: true });
 });
-
 // Logout (clear activeToken)
 router.post("/logout", verifyToken, async (req, res) => {
   req.user.activeToken = null;
   await req.user.save();
   res.json({ success: true });
 });
-
 // Add verifyToken to other routes like /dial/*, /twilio/*
 // Example: router.get('/reports', verifyToken, async (req, res) => { ... });
 
