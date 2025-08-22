@@ -8,13 +8,15 @@ const app = express();
 app.use(
   cors({
     origin: [
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "https://*.ngrok-free.app",
+      "http://localhost:3000", // local frontend (dev)
+      "http://localhost:3001", // another local frontend
+      /\.onrender\.com$/, // allow any frontend hosted on Render
+      /\.vercel\.app$/, // allow any frontend hosted on Vercel
     ],
     credentials: true,
   })
 );
+
 app.use(express.json());
 
 const { router: authRouter, verifyToken } = require("./routes/auth");
