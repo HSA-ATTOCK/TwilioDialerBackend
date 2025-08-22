@@ -35,7 +35,6 @@ router.get("/reports", async (req, res) => {
   });
   res.json(logs);
 });
-
 // Export to CSV (new)
 router.get("/export-csv", async (req, res) => {
   const logs = await CallLog.find();
@@ -51,5 +50,4 @@ router.get("/export-csv", async (req, res) => {
         .join("\n")
   );
 });
-
 module.exports = router;
