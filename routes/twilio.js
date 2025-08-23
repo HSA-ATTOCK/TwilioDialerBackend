@@ -370,7 +370,6 @@ router.post("/call-status", (req, res) => {
 
   res.status(200).send("OK");
 });
-
 // Error handler middleware
 router.use((error, req, res, next) => {
   console.error("Twilio router error:", error);
@@ -380,5 +379,4 @@ router.use((error, req, res, next) => {
     details: process.env.NODE_ENV === "development" ? error.message : undefined,
   });
 });
-
 module.exports = router;
