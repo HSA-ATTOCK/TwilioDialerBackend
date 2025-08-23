@@ -117,8 +117,6 @@ router.post("/logout", verifyToken, async (req, res) => {
   await req.user.save();
   res.json({ success: true });
 });
-
 // Add verifyToken to other routes like /dial/*, /twilio/*
 // Example: router.get('/reports', verifyToken, async (req, res) => { ... });
-
 module.exports = { router, verifyToken }; // Export verifyToken for other routes
