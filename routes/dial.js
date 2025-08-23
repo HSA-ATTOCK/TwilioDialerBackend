@@ -363,7 +363,6 @@ router.post("/upload-numbers", async (req, res) => {
     if (!numbers || !Array.isArray(numbers)) {
       return res.status(400).json({ error: "Invalid numbers data" });
     }
-
     res.json({
       success: true,
       message: `Successfully uploaded ${numbers.length} numbers from ${fileName}`,
@@ -374,5 +373,4 @@ router.post("/upload-numbers", async (req, res) => {
     res.status(500).json({ error: "Failed to upload numbers" });
   }
 });
-
 module.exports = router;
