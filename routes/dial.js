@@ -1,6 +1,7 @@
 const express = require("express");
 const CallLog = require("../models/CallLog");
 const User = require("../models/User");
+const { verifyToken: auth } = require("../routes/auth"); // Add this line
 const router = express.Router();
 
 // Get reports with role-based filtering
@@ -363,6 +364,7 @@ router.post("/upload-numbers", async (req, res) => {
     if (!numbers || !Array.isArray(numbers)) {
       return res.status(400).json({ error: "Invalid numbers data" });
     }
+
     res.json({
       success: true,
       message: `Successfully uploaded ${numbers.length} numbers from ${fileName}`,
@@ -373,4 +375,98 @@ router.post("/upload-numbers", async (req, res) => {
     res.status(500).json({ error: "Failed to upload numbers" });
   }
 });
+
+// Add the call log endpoint
+router.post("/log", auth, async (req, res) => {
+  try {
+    const {
+      userId,
+      type,
+      phoneNumber,
+      auditAction,
+      status,
+      endedBy,
+      disposition,
+      notes,
+      duration,
+      licenseAgentDuration,
+    } = req.body;
+
+    const updateData = {
+      userId,
+      phoneNumber,
+      type,
+      auditAction,
+    };
+
+    // Set timestamps based on status
+    if (status === "ringing") {
+      updateData.ringTime = new Date();
+    } else if (status === "on_call") {
+      updateData.answerTime = new Date();
+    } else if (status === "ended") {
+      updateData.endTime = new Date();
+    }
+
+    // Add optional fields if present
+    if (status) updateData.status = status;
+    if (endedBy) updateData.endedBy = endedBy;
+    if (disposition) updateData.disposition = disposition;
+    if (notes) updateData.notes = notes;
+    if (duration) updateData.duration = duration;
+    if (licenseAgentDuration)
+      updateData.licenseAgentDuration = licenseAgentDuration;
+
+    const callLog = new CallLog(updateData);
+    await callLog.save();
+
+    res.json({
+      success: true,
+      callId: callLog._id,
+      message: `Call ${auditAction} logged successfully`,
+    });
+  } catch (error) {
+    console.error("Call log error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to log call",
+    });
+  }
+});
+
+// Add the disposition endpoint
+router.post("/disposition", auth, async (req, res) => {
+  try {
+    const { callId, disposition, notes } = req.body;
+
+    const callLog = await CallLog.findByIdAndUpdate(
+      callId,
+      {
+        disposition,
+        notes,
+        auditAction: "Disposition Set",
+      },
+      { new: true }
+    );
+
+    if (!callLog) {
+      return res.status(404).json({
+        success: false,
+        error: "Call log not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Disposition saved successfully",
+    });
+  } catch (error) {
+    console.error("Disposition error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to save disposition",
+    });
+  }
+});
+
 module.exports = router;
