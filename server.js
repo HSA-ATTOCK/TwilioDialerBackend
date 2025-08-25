@@ -184,8 +184,10 @@ process.on("uncaughtException", (err) => {
   console.error(err.stack);
   process.exit(1);
 });
+
 process.on("unhandledRejection", (reason, promise) => {
   console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
   process.exit(1);
 });
+
 module.exports = app;
