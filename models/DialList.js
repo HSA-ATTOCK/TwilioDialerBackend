@@ -11,4 +11,5 @@ const dialListSchema = new mongoose.Schema({
   ], // Array of numbers
   createdAt: { type: Date, default: Date.now },
 });
+
 module.exports = mongoose.model("DialList", dialListSchema);
