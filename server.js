@@ -38,6 +38,7 @@ app.use(express.urlencoded({ extended: true })); // Important for Twilio webhook
 const { router: authRouter, verifyToken } = require("./routes/auth");
 const twilioRouter = require("./routes/twilio");
 const dialRouter = require("./routes/dial");
+const recordingRouter = require("./routes/recording");
 
 // Database connection
 mongoose
@@ -75,6 +76,7 @@ app.get("/health", (req, res) => {
 app.use("/auth", authRouter);
 app.use("/twilio", twilioRouter); // No authentication required for Twilio webhooks
 app.use("/dial", verifyToken, dialRouter); // Protected routes for dial operations
+app.use("/recording", verifyToken, recordingRouter); // Protected routes for recording operations
 
 // Test endpoint
 app.get("/test", (req, res) => {
@@ -184,8 +186,10 @@ process.on("uncaughtException", (err) => {
   console.error(err.stack);
   process.exit(1);
 });
+
 process.on("unhandledRejection", (reason, promise) => {
   console.error("❌ Unhandled Rejection at:", promise, "reason:", reason);
   process.exit(1);
 });
+
 module.exports = app;
