@@ -43,7 +43,6 @@ const callLogSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
 // Add index for better query performance
 callLogSchema.index({ userId: 1, startTime: -1 });
 callLogSchema.index({ phoneNumber: 1 });
