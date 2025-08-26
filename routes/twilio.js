@@ -538,30 +538,8 @@ router.post("/transfer", async (req, res) => {
   }
 });
 
-// Mute call endpoint
-router.post("/mute", async (req, res) => {
-  try {
-    const { callSid, mute } = req.body;
-
-    if (!callSid) {
-      throw new Error("Missing callSid");
-    }
-
-    console.log("Mute operation:", callSid, "mute:", mute);
-
-    await client.calls(callSid).update({
-      muted: mute === true || mute === "true",
-    });
-
-    res.json({
-      success: true,
-      message: mute ? "Call muted" : "Call unmuted",
-    });
-  } catch (e) {
-    console.error("Mute operation failed:", e);
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+// Note: Mute functionality is now handled entirely on the frontend
+// Twilio backend no longer handles mute/unmute to ensure full audio connection
 
 // Test TwiML endpoint for verification
 router.get("/test-twiml/:number", (req, res) => {
