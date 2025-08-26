@@ -28,14 +28,18 @@ const GOOGLE_SERVICE_ACCOUNT_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 // Initialize Google Drive API
 const initializeGoogleDrive = () => {
   try {
+    // Parse the service account key from environment variable
+    const serviceAccountKey = JSON.parse(GOOGLE_SERVICE_ACCOUNT_KEY);
+
     const auth = new google.auth.GoogleAuth({
-      keyFile: GOOGLE_SERVICE_ACCOUNT_KEY, // Path to service account JSON
+      credentials: serviceAccountKey, // Use credentials object instead of keyFile
       scopes: ["https://www.googleapis.com/auth/drive.file"],
     });
 
     return google.drive({ version: "v3", auth });
   } catch (error) {
     console.error("Failed to initialize Google Drive:", error);
+    console.error("Error details:", error.message);
     return null;
   }
 };
@@ -43,10 +47,24 @@ const initializeGoogleDrive = () => {
 // Upload recording to Google Drive
 router.post("/upload", upload.single("recording"), async (req, res) => {
   try {
+    console.log("🎙️ Recording upload request received");
+    console.log("Request body:", req.body);
+    console.log(
+      "Request file:",
+      req.file
+        ? {
+            originalname: req.file.originalname,
+            size: req.file.size,
+            mimetype: req.file.mimetype,
+          }
+        : "No file"
+    );
+
     const { phoneNumber, userId } = req.body;
     const file = req.file;
 
     if (!file) {
+      console.error("❌ No recording file provided");
       return res.status(400).json({
         success: false,
         message: "No recording file provided",
@@ -60,11 +78,26 @@ router.post("/upload", upload.single("recording"), async (req, res) => {
       userId,
     });
 
+    // Check Google Drive configuration
+    if (!GOOGLE_DRIVE_FOLDER_ID) {
+      console.error("❌ GOOGLE_DRIVE_FOLDER_ID not configured");
+      throw new Error("Google Drive folder ID not configured");
+    }
+
+    if (!GOOGLE_SERVICE_ACCOUNT_KEY) {
+      console.error("❌ GOOGLE_SERVICE_ACCOUNT_KEY not configured");
+      throw new Error("Google Drive service account key not configured");
+    }
+
     // Initialize Google Drive
+    console.log("🔧 Initializing Google Drive...");
     const drive = initializeGoogleDrive();
     if (!drive) {
+      console.error("❌ Failed to initialize Google Drive");
       throw new Error("Google Drive not configured");
     }
+
+    console.log("✅ Google Drive initialized successfully");
 
     // Prepare file metadata
     const fileMetadata = {
