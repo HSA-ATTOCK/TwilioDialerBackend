@@ -79,10 +79,13 @@ router.get("/access-token", (req, res) => {
       }
     );
 
-    // Add Voice Grant with proper configuration
+    // Add Voice Grant with proper configuration and regional optimization
     const voiceGrant = new VoiceGrant({
       outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID, // For outgoing calls
       incomingAllow: true, // Allow incoming calls
+      // 🚀 OPTIMIZED FOR PAKISTAN (US1 TWIML + SINGAPORE EDGE)
+      region: process.env.TWILIO_REGION || "us1", // Keep US1 for TwiML compatibility
+      edge: process.env.TWILIO_EDGE || "singapore", // Closest edge to Pakistan
     });
 
     token.addGrant(voiceGrant);
