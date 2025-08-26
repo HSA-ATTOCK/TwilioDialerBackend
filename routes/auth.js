@@ -44,10 +44,13 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// Verify token and return role
+// Verify token and return role and user ID
 router.get("/verify", verifyToken, (req, res) => {
-  // Respond with the role from the authenticated user
-  res.json({ role: req.user.role });
+  // Respond with the role and user ID from the authenticated user
+  res.json({
+    role: req.user.role,
+    id: req.user._id.toString(),
+  });
 });
 
 // Login (with validation and single session)
@@ -77,7 +80,11 @@ router.post("/login", async (req, res) => {
   user.activeToken = token;
   await user.save();
   console.log("Login successful:", { username, token });
-  res.json({ token, role: user.role }); // Ensure token is a string
+  res.json({
+    token,
+    role: user.role,
+    id: user._id.toString(),
+  }); // Include user ID in login response
 });
 
 // Create User (with validation)
