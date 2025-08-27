@@ -67,7 +67,15 @@ router.get("/access-token", (req, res) => {
 
     const identity = "browser"; // Fixed identity to match working old app
 
+    console.log("=== ACCESS TOKEN DEBUG ===");
     console.log("Generating access token for identity:", identity);
+    console.log("Account SID:", process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + "...");
+    console.log("API Key:", process.env.TWILIO_API_KEY?.substring(0, 10) + "...");
+    console.log("API Secret:", process.env.TWILIO_API_SECRET ? "SET" : "MISSING");
+    console.log("TwiML App SID:", process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "...");
+    console.log("Region:", process.env.TWILIO_REGION || "ie1");
+    console.log("Edge:", process.env.TWILIO_EDGE || "dublin");
+    console.log("==========================");
 
     // Create AccessToken
     const token = new AccessToken(
@@ -84,9 +92,9 @@ router.get("/access-token", (req, res) => {
     const voiceGrant = new VoiceGrant({
       outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID, // For outgoing calls
       incomingAllow: true, // Allow incoming calls
-      // 🚀 OPTIMIZED FOR PAKISTAN (US1 TWIML + SINGAPORE EDGE)
-      region: process.env.TWILIO_REGION || "us1", // Keep US1 for TwiML compatibility
-      edge: process.env.TWILIO_EDGE || "singapore", // Closest edge to Pakistan
+      // 🚀 UPDATED FOR IRELAND REGION
+      region: process.env.TWILIO_REGION || "ie1", // Ireland region for your new credentials
+      edge: process.env.TWILIO_EDGE || "dublin", // Dublin edge for Ireland region
     });
 
     token.addGrant(voiceGrant);
@@ -94,10 +102,8 @@ router.get("/access-token", (req, res) => {
     const jwtToken = token.toJwt();
 
     console.log("Access token generated successfully");
-    console.log(
-      "Using TwiML App SID:",
-      process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "..."
-    );
+    console.log("JWT Token length:", jwtToken.length);
+    console.log("Token starts with:", jwtToken.substring(0, 20) + "...");
 
     res.json({
       token: jwtToken,
@@ -107,6 +113,8 @@ router.get("/access-token", (req, res) => {
         accountSid: process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + "...",
         apiKey: process.env.TWILIO_API_KEY?.substring(0, 10) + "...",
         twimlAppSid: process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "...",
+        region: process.env.TWILIO_REGION || "ie1",
+        edge: process.env.TWILIO_EDGE || "dublin",
         grants: {
           outgoing: true,
           incoming: true,
@@ -114,7 +122,12 @@ router.get("/access-token", (req, res) => {
       },
     });
   } catch (e) {
-    console.error("Access token generation failed:", e.message);
+    console.error("=== ACCESS TOKEN ERROR ===");
+    console.error("Error message:", e.message);
+    console.error("Error stack:", e.stack);
+    console.error("Missing vars:", missingEnvVars);
+    console.error("==========================");
+    
     res.status(500).json({
       error: "Failed to generate access token",
       details: e.message,
@@ -250,9 +263,14 @@ router.post("/conference", async (req, res) => {
       try {
         const existingCall = await client.calls(callSid).fetch();
         console.log("Existing call status:", existingCall.status);
-        
-        if (existingCall.status === 'completed' || existingCall.status === 'failed') {
-          throw new Error(`Call ${callSid} is no longer active (status: ${existingCall.status})`);
+
+        if (
+          existingCall.status === "completed" ||
+          existingCall.status === "failed"
+        ) {
+          throw new Error(
+            `Call ${callSid} is no longer active (status: ${existingCall.status})`
+          );
         }
       } catch (callFetchError) {
         console.error("Failed to fetch existing call:", callFetchError);
@@ -263,14 +281,17 @@ router.post("/conference", async (req, res) => {
       }
 
       // Generate unique conference room name
-      const conferenceRoom = `ConferenceRoom_${callSid.slice(-8)}_${Date.now()}`;
+      const conferenceRoom = `ConferenceRoom_${callSid.slice(
+        -8
+      )}_${Date.now()}`;
       console.log("Conference room:", conferenceRoom);
 
       try {
         // First, move the existing call into conference
-        const conferenceUrl = holdMusicEnabled && holdMusicUrl
-          ? holdMusicUrl
-          : "http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.wav";
+        const conferenceUrl =
+          holdMusicEnabled && holdMusicUrl
+            ? holdMusicUrl
+            : "http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.wav";
 
         const conferenceTwiML = new VoiceResponse();
         conferenceTwiML.say(
@@ -294,7 +315,10 @@ router.post("/conference", async (req, res) => {
           twiml: conferenceTwiML.toString(),
         });
 
-        console.log("Existing call updated successfully, status:", updatedCall.status);
+        console.log(
+          "Existing call updated successfully, status:",
+          updatedCall.status
+        );
 
         // Wait a moment for the first participant to join
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -336,10 +360,11 @@ router.post("/conference", async (req, res) => {
           originalCallSid: callSid,
           agentCallStatus: agentCall.status,
         });
-        
       } catch (conferenceError) {
         console.error("Conference creation error:", conferenceError);
-        throw new Error(`Failed to create conference: ${conferenceError.message}`);
+        throw new Error(
+          `Failed to create conference: ${conferenceError.message}`
+        );
       }
     }
     // Case 2: Direct call to license agent (no existing call)
@@ -348,15 +373,15 @@ router.post("/conference", async (req, res) => {
 
       const directTwiML = new VoiceResponse();
       directTwiML.say(
-        `Hello ${agentName || "License Agent"}, you have an incoming call from the dialer system.`
+        `Hello ${
+          agentName || "License Agent"
+        }, you have an incoming call from the dialer system.`
       );
       directTwiML.pause({ length: 1 });
-      
+
       // If there's a phoneNumber provided, mention it
       if (phoneNumber) {
-        directTwiML.say(
-          `This call is related to dialing ${phoneNumber}.`
-        );
+        directTwiML.say(`This call is related to dialing ${phoneNumber}.`);
       } else {
         directTwiML.say(
           "This is a direct call initiated by the license agent button."
