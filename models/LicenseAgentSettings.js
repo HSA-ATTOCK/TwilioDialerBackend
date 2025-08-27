@@ -8,6 +8,11 @@ const licenseAgentSettingsSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      required: true,
+    },
     agents: [
       {
         id: { type: String, required: true }, // agent1, agent2, agent3
