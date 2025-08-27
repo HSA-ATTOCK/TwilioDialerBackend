@@ -4,11 +4,16 @@ const dialListSchema = new mongoose.Schema({
   phoneNumber: {
     type: String,
     required: true,
-    unique: true, // Ensure no duplicate numbers globally
+    // Remove global unique constraint, make it unique per organization
   },
   uploadedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
+    required: true,
+  },
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Organization",
     required: true,
   },
   assignedTo: {
@@ -72,7 +77,8 @@ dialListSchema.pre("save", function (next) {
 
 // Index for better query performance
 dialListSchema.index({ assignedTo: 1, dialingStatus: 1 });
-dialListSchema.index({ phoneNumber: 1 });
+dialListSchema.index({ organizationId: 1, phoneNumber: 1 }, { unique: true }); // Unique per organization
+dialListSchema.index({ organizationId: 1, assignedTo: 1 });
 dialListSchema.index({ currentlyDialingBy: 1 });
 
 module.exports = mongoose.model("DialList", dialListSchema);
