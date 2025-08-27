@@ -3,14 +3,14 @@ const CallLog = require("../models/CallLog");
 const DialList = require("../models/DialList");
 const User = require("../models/User");
 const UserStatus = require("../models/UserStatus");
-const { verifyToken: auth } = require("../routes/auth"); // Add this line
+const { authMiddleware: auth } = require("../middleware/auth");
 const router = express.Router();
 
 // Get reports with role-based filtering - Updated to use DialList
 router.get("/reports", async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
-    let query = {};
+    const { role, id: userId, organizationId } = req.user;
+    let query = { organizationId }; // Always filter by organization
     let populateOptions = [
       {
         path: "assignedTo",
@@ -28,15 +28,16 @@ router.get("/reports", async (req, res) => {
 
     switch (role) {
       case "owner":
-        // Owner can see ALL reports from everyone
-        query = { dialingStatus: "completed" };
-        console.log("Owner can see all completed reports");
+        // Owner can see ALL reports from their organization
+        query = { organizationId, dialingStatus: "completed" };
+        console.log("Owner can see all completed reports for organization");
         break;
 
       case "admin":
-        // Admin can see reports from agents they created
+        // Admin can see reports from agents they created in their organization
         const agentsCreatedByAdmin = await User.find({
           createdBy: userId,
+          organizationId,
           role: "agent",
         }).select("_id");
 
@@ -44,6 +45,7 @@ router.get("/reports", async (req, res) => {
         agentIds.push(userId); // Include admin's own reports
 
         query = {
+          organizationId,
           assignedTo: { $in: agentIds },
           dialingStatus: "completed",
         };
@@ -51,8 +53,9 @@ router.get("/reports", async (req, res) => {
         break;
 
       case "agent":
-        // Agents can only see their own reports
+        // Agents can only see their own reports in their organization
         query = {
+          organizationId,
           assignedTo: userId,
           dialingStatus: "completed",
         };
@@ -94,27 +97,28 @@ router.get("/reports", async (req, res) => {
 // Get call logs with duration
 router.get("/call-logs", async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
-    let query = {};
+    const { role, id: userId, organizationId } = req.user;
+    let query = { organizationId }; // Always filter by organization
 
     switch (role) {
       case "owner":
-        // Owner can see ALL call logs
-        query = {};
+        // Owner can see ALL call logs from their organization
+        query = { organizationId };
         break;
       case "admin":
-        // Admin can see call logs from agents they created
+        // Admin can see call logs from agents they created in their organization
         const adminAgents = await User.find({
           createdBy: userId,
+          organizationId,
           role: "agent",
         });
         const agentIds = adminAgents.map((agent) => agent._id);
         agentIds.push(userId); // Include admin's own call logs
-        query = { userId: { $in: agentIds } };
+        query = { organizationId, userId: { $in: agentIds } };
         break;
       case "agent":
-        // Agents can only see their own call logs
-        query = { userId };
+        // Agents can only see their own call logs in their organization
+        query = { organizationId, userId };
         break;
       default:
         return res.status(403).json({ error: "Invalid role" });
@@ -146,22 +150,22 @@ router.get("/call-logs", async (req, res) => {
   }
 });
 
-// Get users based on role (for management)
+// Get users based on role (for management) - organization-specific
 router.get("/users", async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
-    let query = {};
+    const { role, id: userId, organizationId } = req.user;
+    let query = { organizationId }; // Always filter by organization
 
     switch (role) {
       case "owner":
-        // Owner can see ALL users (admins and agents)
-        query = {};
-        console.log("Owner can see all users");
+        // Owner can see ALL users in their organization (admins and agents)
+        query = { organizationId };
+        console.log("Owner can see all users in organization:", organizationId);
         break;
       case "admin":
-        // Admin can see only agents they created
-        query = { createdBy: userId, role: "agent" };
-        console.log("Admin can see their agents:", query);
+        // Admin can see only agents they created within their organization
+        query = { createdBy: userId, role: "agent", organizationId };
+        console.log("Admin can see their agents in organization:", query);
         break;
       case "agent":
         // Agents can't see other users
@@ -171,7 +175,7 @@ router.get("/users", async (req, res) => {
     }
 
     const users = await User.find(query)
-      .select("username role createdAt createdBy")
+      .select("username role createdAt createdBy isActive")
       .populate("createdBy", "username role")
       .sort({ createdAt: -1 });
 
@@ -202,33 +206,35 @@ router.get("/users", async (req, res) => {
 // Get dashboard stats with proper hierarchy
 router.get("/stats", async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
-    let query = {};
-    let userQuery = {};
+    const { role, id: userId, organizationId } = req.user;
+    let query = { organizationId }; // Filter by organization
+    let userQuery = { organizationId }; // Filter by organization
 
-    // Apply role-based filtering for stats
+    // Apply role-based filtering for stats within organization
     switch (role) {
       case "owner":
-        // Owner sees stats for ALL users
-        query = {};
-        userQuery = {};
+        // Owner sees stats for ALL users in their organization
+        query = { organizationId };
+        userQuery = { organizationId };
         break;
       case "admin":
-        // Admin sees stats for themselves and their agents
+        // Admin sees stats for themselves and their agents in their organization
         const agentsCreatedByAdmin = await User.find({
           createdBy: userId,
           role: "agent",
+          organizationId,
         }).select("_id");
         const agentIds = agentsCreatedByAdmin.map((agent) => agent._id);
         query = {
+          organizationId,
           $or: [{ userId: userId }, { userId: { $in: agentIds } }],
         };
-        userQuery = { createdBy: userId, role: "agent" };
+        userQuery = { createdBy: userId, role: "agent", organizationId };
         break;
       case "agent":
         // Agent sees only their own stats
-        query = { userId: userId };
-        userQuery = { _id: userId };
+        query = { userId: userId, organizationId };
+        userQuery = { _id: userId, organizationId };
         break;
     }
 
@@ -281,13 +287,13 @@ router.get("/stats", async (req, res) => {
         User.countDocuments(userQuery),
       ]);
 
-    // Get additional stats for owner
+    // Get additional stats for owner (organization-specific)
     let additionalStats = {};
     if (role === "owner") {
       const [totalAdmins, totalAgents, totalReports] = await Promise.all([
-        User.countDocuments({ role: "admin" }),
-        User.countDocuments({ role: "agent" }),
-        CallLog.countDocuments({}),
+        User.countDocuments({ role: "admin", organizationId }),
+        User.countDocuments({ role: "agent", organizationId }),
+        CallLog.countDocuments({ organizationId }),
       ]);
 
       additionalStats = {
@@ -312,29 +318,32 @@ router.get("/stats", async (req, res) => {
   }
 });
 
-// Delete user (enhanced with proper hierarchy checking)
+// Delete user (enhanced with proper hierarchy checking) - organization-specific
 router.delete("/users/:id", async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
+    const { role, id: userId, organizationId } = req.user;
     const targetUserId = req.params.id;
 
-    // Find the target user
-    const targetUser = await User.findById(targetUserId).populate(
-      "createdBy",
-      "username role"
-    );
+    // Find the target user within the same organization
+    const targetUser = await User.findOne({
+      _id: targetUserId,
+      organizationId,
+    }).populate("createdBy", "username role");
+
     if (!targetUser) {
-      return res.status(404).json({ error: "User not found" });
+      return res
+        .status(404)
+        .json({ error: "User not found in your organization" });
     }
 
     // Check permissions
     if (role === "owner") {
-      // Owner can delete anyone except themselves
+      // Owner can delete anyone in their organization except themselves
       if (targetUserId === userId.toString()) {
         return res.status(400).json({ error: "Cannot delete yourself" });
       }
     } else if (role === "admin") {
-      // Admin can only delete agents they created
+      // Admin can only delete agents they created within their organization
       if (
         targetUser.role !== "agent" ||
         targetUser.createdBy._id.toString() !== userId.toString()
@@ -347,25 +356,29 @@ router.delete("/users/:id", async (req, res) => {
       return res.status(403).json({ error: "Insufficient permissions" });
     }
 
-    // If deleting an admin, also delete all agents they created
+    // If deleting an admin, also delete all agents they created within the organization
     let deletedCount = 0;
     if (targetUser.role === "admin") {
-      const agentsToDelete = await User.find({ createdBy: targetUserId });
+      const agentsToDelete = await User.find({
+        createdBy: targetUserId,
+        organizationId,
+      });
 
       // Delete call logs for all agents created by this admin
       for (const agent of agentsToDelete) {
-        await CallLog.deleteMany({ userId: agent._id });
+        await CallLog.deleteMany({ userId: agent._id, organizationId });
       }
 
-      // Delete all agents created by this admin
+      // Delete all agents created by this admin within the organization
       const agentDeleteResult = await User.deleteMany({
         createdBy: targetUserId,
+        organizationId,
       });
       deletedCount = agentDeleteResult.deletedCount;
     }
 
-    // Delete the target user's call logs
-    await CallLog.deleteMany({ userId: targetUserId });
+    // Delete the target user's call logs within the organization
+    await CallLog.deleteMany({ userId: targetUserId, organizationId });
 
     // Delete the target user
     await User.findByIdAndDelete(targetUserId);
@@ -382,29 +395,99 @@ router.delete("/users/:id", async (req, res) => {
   }
 });
 
+// Toggle user activation status (activate/deactivate) - organization-specific
+router.patch("/users/:id/toggle-status", auth, async (req, res) => {
+  try {
+    const { role, id: userId, organizationId } = req.user;
+    const targetUserId = req.params.id;
+
+    // Find the target user within the same organization
+    const targetUser = await User.findOne({
+      _id: targetUserId,
+      organizationId,
+    }).populate("createdBy", "username role");
+
+    if (!targetUser) {
+      return res
+        .status(404)
+        .json({ error: "User not found in your organization" });
+    }
+
+    // Check permissions
+    if (role === "owner") {
+      // Owner can toggle status for anyone in their organization except themselves
+      if (targetUserId === userId.toString()) {
+        return res.status(400).json({ error: "Cannot change your own status" });
+      }
+    } else if (role === "admin") {
+      // Admin can only toggle status for agents they created within their organization
+      if (
+        targetUser.role !== "agent" ||
+        !targetUser.createdBy ||
+        targetUser.createdBy._id.toString() !== userId.toString()
+      ) {
+        return res
+          .status(403)
+          .json({ error: "You can only manage agents you created" });
+      }
+    } else {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    // Toggle the activation status
+    targetUser.isActive = !targetUser.isActive;
+    await targetUser.save();
+
+    // If deactivating, also clear any active tokens to force logout
+    if (!targetUser.isActive) {
+      targetUser.activeToken = null;
+      await targetUser.save();
+    }
+
+    const statusText = targetUser.isActive ? "activated" : "deactivated";
+    const message = `User ${targetUser.username} has been ${statusText} successfully`;
+
+    res.json({
+      success: true,
+      message,
+      user: {
+        id: targetUser._id,
+        username: targetUser.username,
+        role: targetUser.role,
+        isActive: targetUser.isActive,
+      },
+    });
+  } catch (error) {
+    console.error("Error toggling user status:", error);
+    res.status(500).json({ error: "Failed to toggle user status" });
+  }
+});
+
 // Export CSV reports (no changes needed - already works correctly)
 router.get("/export-csv", async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
-    let query = {};
+    const { role, id: userId, organizationId } = req.user;
+    let query = { organizationId }; // Filter by organization
 
-    // Apply same role-based filtering as reports
+    // Apply same role-based filtering as reports within organization
     switch (role) {
       case "owner":
-        query = {};
+        query = { organizationId };
         break;
       case "admin":
         const agentsCreatedByAdmin = await User.find({
           createdBy: userId,
           role: "agent",
+          organizationId,
         }).select("_id");
         const agentIds = agentsCreatedByAdmin.map((agent) => agent._id);
         query = {
+          organizationId,
           $or: [{ userId: userId }, { userId: { $in: agentIds } }],
         };
         break;
       case "agent":
-        query = { userId: userId };
+        query = { userId: userId, organizationId };
         break;
       default:
         return res.status(403).json({ error: "Invalid role" });
@@ -460,7 +543,7 @@ router.get("/export-csv", async (req, res) => {
 // Upload numbers file (owner/admin can upload and assign to agents)
 router.post("/upload-numbers", auth, async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
+    const { role, id: userId } = req.user;
 
     // Only owners and admins can upload numbers
     if (role === "agent") {
@@ -508,13 +591,19 @@ router.post("/upload-numbers", auth, async (req, res) => {
 
     for (const number of numbers) {
       try {
-        // Check if number already exists
-        const existingNumber = await DialList.findOne({ phoneNumber: number });
+        // Check if number already exists in the same organization
+        const existingNumber = await DialList.findOne({
+          phoneNumber: number,
+          organizationId: req.user.organizationId, // FIXED: Add organizationId filter
+        });
 
         if (existingNumber) {
           // Reset calling status while preserving disposition and comments
           await DialList.updateOne(
-            { phoneNumber: number },
+            {
+              phoneNumber: number,
+              organizationId: req.user.organizationId, // FIXED: Add organizationId filter
+            },
             {
               $set: {
                 dialingStatus: "pending",
@@ -536,6 +625,7 @@ router.post("/upload-numbers", auth, async (req, res) => {
         // Create new dial list entry
         const dialListEntry = new DialList({
           phoneNumber: number,
+          organizationId: req.user.organizationId, // FIXED: Add organizationId
           uploadedBy: userId,
           assignedTo: assignToUserId,
           dialingStatus: "pending",
@@ -559,18 +649,22 @@ router.post("/upload-numbers", auth, async (req, res) => {
   }
 });
 
-// Get available agents for number assignment
+// Get available agents for number assignment - organization-specific
 router.get("/available-agents", auth, async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
-    let query = {};
+    const { role, _id: userId, organizationId } = req.user;
+    let query = { organizationId }; // Always filter by organization
 
     if (role === "owner") {
-      // Owner can see all agents and admins
-      query = { role: { $in: ["admin", "agent"] } };
-    } else if (role === "admin") {
-      // Admin can see themselves and agents they created
+      // Owner can see all agents and admins in their organization
       query = {
+        organizationId,
+        role: { $in: ["admin", "agent"] },
+      };
+    } else if (role === "admin") {
+      // Admin can see themselves and agents they created within their organization
+      query = {
+        organizationId,
         $or: [
           { _id: userId }, // Admin themselves
           { createdBy: userId, role: "agent" }, // Agents they created
@@ -591,14 +685,41 @@ router.get("/available-agents", auth, async (req, res) => {
 // Get numbers assigned to the current user for dialing
 router.get("/my-numbers", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const userId = req.user.id; // FIXED: Use req.user.id instead of destructuring _id
+
+    console.log("=== MY NUMBERS DEBUG ===");
+    console.log("User ID:", userId);
+    console.log("Organization ID:", req.user.organizationId);
+
+    // First check all numbers assigned to this user regardless of organization
+    const allUserNumbers = await DialList.find({ assignedTo: userId });
+    console.log(
+      "Total numbers assigned to user (any org):",
+      allUserNumbers.length
+    );
+
+    if (allUserNumbers.length > 0) {
+      console.log(
+        "Sample user numbers:",
+        allUserNumbers.slice(0, 3).map((n) => ({
+          phoneNumber: n.phoneNumber,
+          organizationId: n.organizationId,
+          dialingStatus: n.dialingStatus,
+          hasOrgId: !!n.organizationId,
+        }))
+      );
+    }
 
     const numbers = await DialList.find({
       assignedTo: userId,
+      organizationId: req.user.organizationId, // FIXED: Add organizationId filter
       dialingStatus: { $in: ["pending", "failed", "no_answer", "busy"] }, // Only get numbers that can be dialed
     })
       .sort({ priority: -1, createdAt: 1 }) // Higher priority first, then oldest first
       .limit(1000); // Limit for performance
+
+    console.log("Numbers with org filter:", numbers.length);
+    console.log("========================");
 
     res.json(numbers);
   } catch (error) {
@@ -610,16 +731,39 @@ router.get("/my-numbers", auth, async (req, res) => {
 // Get next number to dial (with locking mechanism)
 router.post("/get-next-number", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const userId = req.user.id; // FIXED: Use req.user.id instead of destructuring _id
 
-    // Find the next available number that has never been completed
-    // Only get numbers that are truly pending (never dialed before)
+    console.log("=== GET NEXT NUMBER DEBUG ===");
+    console.log("User ID:", userId);
+    console.log("Organization ID:", req.user.organizationId);
+
+    // First, let's see what numbers are available for this user
+    const availableNumbers = await DialList.find({
+      assignedTo: userId,
+      organizationId: req.user.organizationId,
+      dialingStatus: { $in: ["pending", "failed", "no_answer", "busy"] },
+      currentlyDialingBy: null,
+    }).limit(5);
+
+    console.log("Available numbers for user:", availableNumbers.length);
+    console.log(
+      "First few available numbers:",
+      availableNumbers.map((n) => ({
+        phoneNumber: n.phoneNumber,
+        dialingStatus: n.dialingStatus,
+        attempts: n.attempts,
+        priority: n.priority,
+      }))
+    );
+
+    // Find the next available number - prioritize never-attempted, then retry failed ones
     const nextNumber = await DialList.findOneAndUpdate(
       {
         assignedTo: userId,
-        dialingStatus: "pending", // Only get pending numbers, not failed/busy/no_answer
+        organizationId: req.user.organizationId,
+        dialingStatus: { $in: ["pending", "failed", "no_answer", "busy"] }, // FIXED: Allow retries
         currentlyDialingBy: null, // Not currently being dialed by someone else
-        attempts: 0, // Only numbers that have never been attempted
+        attempts: { $lt: 3 }, // FIXED: Allow up to 3 attempts instead of only 0
       },
       {
         dialingStatus: "dialing",
@@ -629,17 +773,38 @@ router.post("/get-next-number", auth, async (req, res) => {
       },
       {
         new: true,
-        sort: { priority: -1, createdAt: 1 }, // Higher priority first, then oldest first
+        sort: { attempts: 1, priority: -1, createdAt: 1 }, // FIXED: Never-attempted first, then priority, then oldest
       }
     );
 
+    console.log(
+      "Next number found:",
+      nextNumber
+        ? {
+            phoneNumber: nextNumber.phoneNumber,
+            dialingStatus: nextNumber.dialingStatus,
+            attempts: nextNumber.attempts,
+            priority: nextNumber.priority,
+          }
+        : null
+    );
+    console.log("=============================");
+
     if (!nextNumber) {
+      console.log("No more numbers available for user:", userId);
       return res.json({
         success: false,
         message: "No more numbers available to dial",
         hasMore: false,
       });
     }
+
+    console.log(
+      "Returning number:",
+      nextNumber.phoneNumber,
+      "to user:",
+      userId
+    );
 
     res.json({
       success: true,
@@ -655,7 +820,7 @@ router.post("/get-next-number", auth, async (req, res) => {
 // Update number status after call completion
 router.post("/update-number-status", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const userId = req.user.id; // FIXED: Use req.user.id instead of destructuring _id
     const { numberId, status, disposition, notes, comments } = req.body;
 
     if (!numberId || !status) {
@@ -685,6 +850,7 @@ router.post("/update-number-status", auth, async (req, res) => {
     const updatedNumber = await DialList.findOneAndUpdate(
       {
         _id: numberId,
+        organizationId: req.user.organizationId, // FIXED: Add organizationId filter
         currentlyDialingBy: userId, // Ensure only the user who locked it can update
       },
       updateData,
@@ -711,7 +877,7 @@ router.post("/update-number-status", auth, async (req, res) => {
 // Release number lock (in case of errors or cancellation)
 router.post("/release-number-lock", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const userId = req.user.id; // FIXED: Use req.user.id instead of destructuring _id
     const { numberId } = req.body;
 
     if (!numberId) {
@@ -721,6 +887,7 @@ router.post("/release-number-lock", auth, async (req, res) => {
     const updatedNumber = await DialList.findOneAndUpdate(
       {
         _id: numberId,
+        organizationId: req.user.organizationId, // FIXED: Add organizationId filter
         currentlyDialingBy: userId,
       },
       {
@@ -749,10 +916,26 @@ router.post("/release-number-lock", auth, async (req, res) => {
 // Get dialing statistics for a user
 router.get("/dialing-stats", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const userId = req.user.id; // FIXED: Use req.user.id instead of destructuring _id
+
+    console.log("=== DIALING STATS DEBUG ===");
+    console.log("User ID:", userId);
+    console.log("Organization ID:", req.user.organizationId);
+
+    // Check all numbers for this user regardless of organization
+    const allUserStats = await DialList.aggregate([
+      { $match: { assignedTo: userId } },
+      { $group: { _id: "$dialingStatus", count: { $sum: 1 } } },
+    ]);
+    console.log("All user numbers stats (any org):", allUserStats);
 
     const stats = await DialList.aggregate([
-      { $match: { assignedTo: userId } },
+      {
+        $match: {
+          assignedTo: userId,
+          organizationId: req.user.organizationId, // FIXED: Add organizationId filter
+        },
+      },
       {
         $group: {
           _id: "$dialingStatus",
@@ -760,6 +943,9 @@ router.get("/dialing-stats", auth, async (req, res) => {
         },
       },
     ]);
+
+    console.log("Org-filtered stats:", stats);
+    console.log("===========================");
 
     const formattedStats = {
       pending: 0,
@@ -811,6 +997,7 @@ router.post("/log", auth, async (req, res) => {
       // Create new call log for call start
       const updateData = {
         userId,
+        organizationId: req.user.organizationId,
         phoneNumber,
         type,
         auditAction,
@@ -842,8 +1029,11 @@ router.post("/log", auth, async (req, res) => {
 
         if (isCurrentDay) {
           await UserStatus.findOneAndUpdate(
-            { userId },
-            { $inc: { totalCallsToday: 1 } },
+            { userId, organizationId: req.user.organizationId },
+            {
+              $inc: { totalCallsToday: 1 },
+              $setOnInsert: { organizationId: req.user.organizationId },
+            },
             { upsert: true, new: true }
           );
           console.log("Incremented totalCallsToday for user:", userId);
@@ -909,6 +1099,7 @@ router.post("/log", auth, async (req, res) => {
           // If no existing call log found, create a new one (fallback)
           const updateData = {
             userId,
+            organizationId: req.user.organizationId, // FIXED: Add organizationId
             phoneNumber,
             type,
             auditAction,
@@ -939,6 +1130,7 @@ router.post("/log", auth, async (req, res) => {
         // Fallback to creating new log
         const updateData = {
           userId,
+          organizationId: req.user.organizationId, // FIXED: Add organizationId
           phoneNumber,
           type,
           auditAction,
@@ -966,6 +1158,7 @@ router.post("/log", auth, async (req, res) => {
       // For other actions (ringing, connected, etc.), update existing or create new
       const updateData = {
         userId,
+        organizationId: req.user.organizationId, // FIXED: Add organizationId
         phoneNumber,
         type,
         auditAction,
@@ -1050,11 +1243,22 @@ router.post("/disposition", auth, async (req, res) => {
     // Now update the dial list entry for this phone number
     const phoneNumber = callLog.phoneNumber;
     console.log("Updating dial list for phone number:", phoneNumber);
+    console.log("Looking for dial list entry with:");
+    console.log("- phoneNumber:", phoneNumber);
+    console.log("- assignedTo:", req.user.id);
+    console.log("- organizationId:", req.user.organizationId);
+
+    // First, let's see what dial list entries exist for this phone number
+    const allEntriesForPhone = await DialList.find({
+      phoneNumber: phoneNumber,
+    });
+    console.log("All dial list entries for this phone:", allEntriesForPhone);
 
     const dialListUpdate = await DialList.findOneAndUpdate(
       {
         phoneNumber: phoneNumber,
         assignedTo: req.user.id, // Only update if assigned to current user
+        organizationId: req.user.organizationId, // FIXED: Add organizationId filter
       },
       {
         disposition: disposition,
@@ -1098,15 +1302,16 @@ router.post("/disposition", auth, async (req, res) => {
 // Update user login status
 router.post("/user-status/login", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const { id: userId, organizationId } = req.user;
 
     await UserStatus.findOneAndUpdate(
-      { userId },
+      { userId, organizationId },
       {
         isLoggedIn: true,
         lastLoginTime: new Date(),
         deviceStatus: "ready",
         lastActivity: new Date(),
+        $setOnInsert: { organizationId },
       },
       { upsert: true, new: true }
     );
@@ -1121,10 +1326,10 @@ router.post("/user-status/login", auth, async (req, res) => {
 // Update user logout status
 router.post("/user-status/logout", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const { id: userId, organizationId } = req.user;
 
     await UserStatus.findOneAndUpdate(
-      { userId },
+      { userId, organizationId },
       {
         isLoggedIn: false,
         lastLogoutTime: new Date(),
@@ -1148,7 +1353,7 @@ router.post("/user-status/logout", auth, async (req, res) => {
 // Update call status
 router.post("/user-status/call", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const userId = req.user.id; // FIXED: Use req.user.id instead of destructuring _id
     const { isOnCall, callStatus, phoneNumber, callStartTime } = req.body;
 
     const updateData = {
@@ -1165,10 +1370,17 @@ router.post("/user-status/call", auth, async (req, res) => {
       updateData.currentCallStartTime = null;
     }
 
-    await UserStatus.findOneAndUpdate({ userId }, updateData, {
-      upsert: true,
-      new: true,
-    });
+    await UserStatus.findOneAndUpdate(
+      { userId, organizationId: req.user.organizationId },
+      {
+        ...updateData,
+        $setOnInsert: { organizationId: req.user.organizationId },
+      },
+      {
+        upsert: true,
+        new: true,
+      }
+    );
 
     res.json({ success: true, message: "Call status updated" });
   } catch (error) {
@@ -1180,11 +1392,11 @@ router.post("/user-status/call", auth, async (req, res) => {
 // Update auto dialer status
 router.post("/user-status/autodialer", auth, async (req, res) => {
   try {
-    const { _id: userId } = req.user;
+    const { id: userId, organizationId } = req.user;
     const { autoDialerStatus } = req.body;
 
     await UserStatus.findOneAndUpdate(
-      { userId },
+      { userId, organizationId },
       {
         autoDialerStatus,
         lastActivity: new Date(),
@@ -1202,18 +1414,19 @@ router.post("/user-status/autodialer", auth, async (req, res) => {
 // Get real-time status of all users (for owner/admin)
 router.get("/user-status/all", auth, async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
+    const { role, id: userId, organizationId } = req.user;
     let userQuery = {};
 
     switch (role) {
       case "owner":
-        // Owner can see all users
+        // Owner can see all users in their organization
         userQuery = {};
         break;
       case "admin":
-        // Admin can see agents they created
+        // Admin can see agents they created in their organization
         const agentsCreatedByAdmin = await User.find({
           createdBy: userId,
+          organizationId,
           role: "agent",
         }).select("_id");
 
@@ -1225,9 +1438,14 @@ router.get("/user-status/all", auth, async (req, res) => {
         return res.status(403).json({ error: "Access denied" });
     }
 
-    const users = await User.find(userQuery).select("username role createdBy");
+    const users = await User.find({
+      ...userQuery,
+      organizationId: req.user.organizationId,
+    }).select("username role createdBy");
+
     const userStatuses = await UserStatus.find({
       userId: { $in: users.map((u) => u._id) },
+      organizationId: req.user.organizationId,
     }).populate("userId", "username role");
 
     // Calculate Pakistani time zone day boundaries
@@ -1312,67 +1530,19 @@ router.get("/user-status/all", auth, async (req, res) => {
 // === LICENSE AGENT SETTINGS ROUTES ===
 const LicenseAgentSettings = require("../models/LicenseAgentSettings");
 
-// Get license agent settings (All authenticated users can read, but gets owner's settings)
+// Get license agent settings (Organization-based)
 router.get("/license-agent-settings", auth, async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
+    const { role, organizationId } = req.user;
 
-    let ownerId = userId;
-
-    // If user is not owner, find the owner they belong to
-    if (role !== "owner") {
-      if (role === "admin") {
-        // Admin: find the owner who created them
-        const adminUser = await User.findById(userId).populate("createdBy");
-        if (
-          adminUser &&
-          adminUser.createdBy &&
-          adminUser.createdBy.role === "owner"
-        ) {
-          ownerId = adminUser.createdBy._id;
-        } else {
-          // If admin wasn't created by owner, find any owner (fallback)
-          const owner = await User.findOne({ role: "owner" });
-          ownerId = owner ? owner._id : userId;
-        }
-      } else if (role === "agent") {
-        // Agent: find the admin or owner who created them
-        const agentUser = await User.findById(userId).populate("createdBy");
-        if (agentUser && agentUser.createdBy) {
-          if (agentUser.createdBy.role === "owner") {
-            ownerId = agentUser.createdBy._id;
-          } else if (agentUser.createdBy.role === "admin") {
-            // Agent created by admin, find the owner who created that admin
-            const adminUser = await User.findById(
-              agentUser.createdBy._id
-            ).populate("createdBy");
-            if (
-              adminUser &&
-              adminUser.createdBy &&
-              adminUser.createdBy.role === "owner"
-            ) {
-              ownerId = adminUser.createdBy._id;
-            } else {
-              // Fallback to any owner
-              const owner = await User.findOne({ role: "owner" });
-              ownerId = owner ? owner._id : userId;
-            }
-          }
-        } else {
-          // Fallback to any owner
-          const owner = await User.findOne({ role: "owner" });
-          ownerId = owner ? owner._id : userId;
-        }
-      }
-    }
-
-    let settings = await LicenseAgentSettings.findOne({ ownerId });
+    // Get settings for the user's organization
+    let settings = await LicenseAgentSettings.findOne({ organizationId });
 
     if (!settings) {
       // Create default settings if none exist (only if requesting user is owner)
       if (role === "owner") {
         settings = new LicenseAgentSettings({
-          ownerId,
+          organizationId,
           agents: [
             {
               id: "agent1",
@@ -1433,10 +1603,10 @@ router.get("/license-agent-settings", auth, async (req, res) => {
   }
 });
 
-// Update license agent settings (Owner only)
+// Update license agent settings (Owner only) - Organization-based
 router.put("/license-agent-settings", auth, async (req, res) => {
   try {
-    const { role, _id: userId } = req.user;
+    const { role, organizationId } = req.user;
     const { agents, holdMusicEnabled, holdMusicUrl } = req.body;
 
     if (role !== "owner") {
@@ -1459,10 +1629,10 @@ router.put("/license-agent-settings", auth, async (req, res) => {
       }
     }
 
-    let settings = await LicenseAgentSettings.findOne({ ownerId: userId });
+    let settings = await LicenseAgentSettings.findOne({ organizationId });
 
     if (!settings) {
-      settings = new LicenseAgentSettings({ ownerId: userId });
+      settings = new LicenseAgentSettings({ organizationId });
     }
 
     settings.agents = agents;
