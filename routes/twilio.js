@@ -2,7 +2,7 @@ const express = require("express");
 const twilio = require("twilio");
 const { AccessToken } = twilio.jwt;
 const { VoiceGrant } = AccessToken;
-const { VoiceResponse } = require('twilio').twiml;
+const { VoiceResponse } = require("twilio").twiml;
 const router = express.Router();
 
 // Initialize Twilio client
@@ -174,7 +174,7 @@ router.post("/hold", async (req, res) => {
   }
 });
 
-// Enhanced Conference functionality
+// Enhanced Conference functionality - FIXED
 router.post("/conference", async (req, res) => {
   try {
     const {
@@ -193,6 +193,8 @@ router.post("/conference", async (req, res) => {
     console.log("License Agent Number:", licenseAgentNumber);
     console.log("Agent Name:", agentName);
     console.log("Hold Music Enabled:", holdMusicEnabled);
+    console.log("Phone Number:", phoneNumber);
+    console.log("User ID:", userId);
     console.log("================================");
 
     // Validation
@@ -205,7 +207,7 @@ router.post("/conference", async (req, res) => {
     }
 
     // Validate phone number format
-    const cleanNumber = licenseAgentNumber.replace(/[\s\-()]/g, '');
+    const cleanNumber = licenseAgentNumber.replace(/[\s\-()]/g, "");
     if (!/^\+?\d{10,15}$/.test(cleanNumber)) {
       console.error("ERROR: Invalid phone number format:", licenseAgentNumber);
       return res.status(400).json({
@@ -215,7 +217,11 @@ router.post("/conference", async (req, res) => {
     }
 
     // Validate environment variables
-    if (!process.env.TWILIO_PHONE_NUMBER || !process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    if (
+      !process.env.TWILIO_PHONE_NUMBER ||
+      !process.env.TWILIO_ACCOUNT_SID ||
+      !process.env.TWILIO_AUTH_TOKEN
+    ) {
       console.error("ERROR: Missing Twilio configuration");
       return res.status(500).json({
         success: false,
@@ -236,9 +242,25 @@ router.post("/conference", async (req, res) => {
       });
     }
 
-    // Case 1: Adding to existing call conference
-    if (callSid) {
+    // Case 1: Adding to existing call conference (callSid provided)
+    if (callSid && callSid.trim() !== "") {
       console.log("Case 1: Adding agent to existing call conference");
+
+      // Verify the call exists and is active
+      try {
+        const existingCall = await client.calls(callSid).fetch();
+        console.log("Existing call status:", existingCall.status);
+        
+        if (existingCall.status === 'completed' || existingCall.status === 'failed') {
+          throw new Error(`Call ${callSid} is no longer active (status: ${existingCall.status})`);
+        }
+      } catch (callFetchError) {
+        console.error("Failed to fetch existing call:", callFetchError);
+        return res.status(400).json({
+          success: false,
+          error: `Invalid or inactive call: ${callFetchError.message}`,
+        });
+      }
 
       // Generate unique conference room name
       const conferenceRoom = `ConferenceRoom_${callSid.slice(-8)}_${Date.now()}`;
@@ -246,20 +268,22 @@ router.post("/conference", async (req, res) => {
 
       try {
         // First, move the existing call into conference
-        const conferenceUrl = holdMusicEnabled && holdMusicUrl ? 
-          `http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.wav` :
-          undefined;
+        const conferenceUrl = holdMusicEnabled && holdMusicUrl
+          ? holdMusicUrl
+          : "http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.wav";
 
         const conferenceTwiML = new VoiceResponse();
-        conferenceTwiML.say(`Adding ${agentName || "license agent"} to the call. Please wait.`);
-        
+        conferenceTwiML.say(
+          `Adding ${agentName || "license agent"} to the call. Please wait.`
+        );
+
         const dial = conferenceTwiML.dial();
         const conference = dial.conference(conferenceRoom, {
           startConferenceOnEnter: true,
           endConferenceOnExit: false,
           waitUrl: conferenceUrl,
-          waitMethod: 'GET',
-          maxParticipants: 10
+          waitMethod: "GET",
+          maxParticipants: 10,
         });
 
         console.log("Generated conference TwiML:", conferenceTwiML.toString());
@@ -269,21 +293,23 @@ router.post("/conference", async (req, res) => {
         const updatedCall = await client.calls(callSid).update({
           twiml: conferenceTwiML.toString(),
         });
-        
+
         console.log("Existing call updated successfully, status:", updatedCall.status);
 
         // Wait a moment for the first participant to join
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Create TwiML for agent to join the same conference
         const agentTwiML = new VoiceResponse();
-        agentTwiML.say(`Hello ${agentName || "License Agent"}, joining conference call.`);
-        
+        agentTwiML.say(
+          `Hello ${agentName || "License Agent"}, joining conference call.`
+        );
+
         const agentDial = agentTwiML.dial();
         const agentConference = agentDial.conference(conferenceRoom, {
           startConferenceOnEnter: true,
           endConferenceOnExit: false,
-          maxParticipants: 10
+          maxParticipants: 10,
         });
 
         console.log("Generated agent TwiML:", agentTwiML.toString());
@@ -308,9 +334,9 @@ router.post("/conference", async (req, res) => {
           conferenceRoom: conferenceRoom,
           agentCallSid: agentCall.sid,
           originalCallSid: callSid,
-          agentCallStatus: agentCall.status
+          agentCallStatus: agentCall.status,
         });
-
+        
       } catch (conferenceError) {
         console.error("Conference creation error:", conferenceError);
         throw new Error(`Failed to create conference: ${conferenceError.message}`);
@@ -321,9 +347,21 @@ router.post("/conference", async (req, res) => {
       console.log("Case 2: Making direct call to license agent");
 
       const directTwiML = new VoiceResponse();
-      directTwiML.say(`Hello ${agentName || "License Agent"}, you have an incoming call from the dialer system.`);
+      directTwiML.say(
+        `Hello ${agentName || "License Agent"}, you have an incoming call from the dialer system.`
+      );
       directTwiML.pause({ length: 1 });
-      directTwiML.say("This is a direct call initiated by the license agent button.");
+      
+      // If there's a phoneNumber provided, mention it
+      if (phoneNumber) {
+        directTwiML.say(
+          `This call is related to dialing ${phoneNumber}.`
+        );
+      } else {
+        directTwiML.say(
+          "This is a direct call initiated by the license agent button."
+        );
+      }
 
       console.log("Creating direct agent call...");
       console.log("Direct call TwiML:", directTwiML.toString());
@@ -346,10 +384,9 @@ router.post("/conference", async (req, res) => {
         message: `Direct call initiated to ${agentName || "license agent"}`,
         agentCallSid: agentCall.sid,
         type: "direct",
-        agentCallStatus: agentCall.status
+        agentCallStatus: agentCall.status,
       });
     }
-
   } catch (error) {
     console.error("=== CONFERENCE ERROR DEBUG ===");
     console.error("Error message:", error.message);
@@ -359,10 +396,28 @@ router.post("/conference", async (req, res) => {
     console.error("Twilio Error Status:", error.status);
     console.error("==============================");
 
+    // More specific error handling
+    let errorMessage = error.message;
+    let statusCode = 500;
+
+    if (error.code === 21220) {
+      errorMessage = "Invalid phone number format";
+      statusCode = 400;
+    } else if (error.code === 20003) {
+      errorMessage = "Authentication failed - check Twilio credentials";
+      statusCode = 401;
+    } else if (error.code === 21217) {
+      errorMessage = "Phone number not verified or invalid";
+      statusCode = 400;
+    } else if (error.code === 20404) {
+      errorMessage = "Call not found or already ended";
+      statusCode = 404;
+    }
+
     // Send detailed error response
-    res.status(500).json({
+    res.status(statusCode).json({
       success: false,
-      error: error.message,
+      error: errorMessage,
       errorType: error.constructor.name,
       twilioCode: error.code || null,
       twilioStatus: error.status || null,
@@ -380,7 +435,9 @@ router.all("/agent-direct-call", (req, res) => {
   const agentName = req.query.agentName || "License Agent";
 
   const vr = new VoiceResponse();
-  vr.say(`Hello ${agentName}, you are connected to a direct call from the dialer system.`);
+  vr.say(
+    `Hello ${agentName}, you are connected to a direct call from the dialer system.`
+  );
 
   console.log("Generated TwiML for agent direct call:", vr.toString());
   res.type("text/xml").send(vr.toString());
