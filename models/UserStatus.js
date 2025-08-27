@@ -7,6 +7,11 @@ const userStatusSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Organization",
+    required: true,
+  },
   isLoggedIn: {
     type: Boolean,
     default: false,
