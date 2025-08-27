@@ -627,4 +627,139 @@ router.post("/agent-direct-call", (req, res) => {
   res.type("text/xml").send(vr.toString());
 });
 
+// End Client Call - Remove client from conference
+router.post("/end-client-call", async (req, res) => {
+  try {
+    console.log("=== END CLIENT CALL REQUEST ===");
+    console.log("Body:", req.body);
+
+    const { callSid, userId } = req.body;
+
+    if (!callSid) {
+      return res.status(400).json({
+        success: false,
+        error: "CallSid is required",
+      });
+    }
+
+    // Get conference participants for this call
+    const conferences = await client.conferences.list({
+      friendlyName: `Room${callSid.slice(-8)}`,
+      status: "in-progress",
+    });
+
+    console.log("Found conferences:", conferences.length);
+
+    if (conferences.length > 0) {
+      const conference = conferences[0];
+      console.log("Conference SID:", conference.sid);
+
+      // Get participants
+      const participants = await client
+        .conferences(conference.sid)
+        .participants.list();
+      console.log(
+        "Conference participants:",
+        participants.map((p) => ({
+          callSid: p.callSid,
+          muted: p.muted,
+          hold: p.hold,
+        }))
+      );
+
+      // Find and remove the client (original call participant)
+      for (const participant of participants) {
+        if (participant.callSid === callSid) {
+          console.log("Removing client participant:", participant.callSid);
+          await client
+            .conferences(conference.sid)
+            .participants(participant.callSid)
+            .remove();
+          break;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Client removed from conference",
+    });
+  } catch (error) {
+    console.error("Error ending client call:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// End License Agent Call - Remove license agent from conference
+router.post("/end-license-agent-call", async (req, res) => {
+  try {
+    console.log("=== END LICENSE AGENT CALL REQUEST ===");
+    console.log("Body:", req.body);
+
+    const { callSid, userId } = req.body;
+
+    if (!callSid) {
+      return res.status(400).json({
+        success: false,
+        error: "CallSid is required",
+      });
+    }
+
+    // Get conference participants for this call
+    const conferences = await client.conferences.list({
+      friendlyName: `Room${callSid.slice(-8)}`,
+      status: "in-progress",
+    });
+
+    console.log("Found conferences:", conferences.length);
+
+    if (conferences.length > 0) {
+      const conference = conferences[0];
+      console.log("Conference SID:", conference.sid);
+
+      // Get participants
+      const participants = await client
+        .conferences(conference.sid)
+        .participants.list();
+      console.log(
+        "Conference participants:",
+        participants.map((p) => ({
+          callSid: p.callSid,
+          muted: p.muted,
+          hold: p.hold,
+        }))
+      );
+
+      // Find and remove the license agent (look for participant that's not the original call)
+      for (const participant of participants) {
+        if (participant.callSid !== callSid) {
+          console.log(
+            "Removing license agent participant:",
+            participant.callSid
+          );
+          await client
+            .conferences(conference.sid)
+            .participants(participant.callSid)
+            .remove();
+          break;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "License agent removed from conference",
+    });
+  } catch (error) {
+    console.error("Error ending license agent call:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;
