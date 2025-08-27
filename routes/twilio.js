@@ -2,6 +2,7 @@ const express = require("express");
 const twilio = require("twilio");
 const { AccessToken } = twilio.jwt;
 const { VoiceGrant } = AccessToken;
+const { VoiceResponse } = require('twilio').twiml;
 const router = express.Router();
 
 // Initialize Twilio client
@@ -194,6 +195,7 @@ router.post("/conference", async (req, res) => {
     console.log("Hold Music Enabled:", holdMusicEnabled);
     console.log("================================");
 
+    // Validation
     if (!licenseAgentNumber) {
       console.error("ERROR: Missing licenseAgentNumber");
       return res.status(400).json({
@@ -203,7 +205,8 @@ router.post("/conference", async (req, res) => {
     }
 
     // Validate phone number format
-    if (!/^\+?[\d\s\-()]+$/.test(licenseAgentNumber)) {
+    const cleanNumber = licenseAgentNumber.replace(/[\s\-()]/g, '');
+    if (!/^\+?\d{10,15}$/.test(cleanNumber)) {
       console.error("ERROR: Invalid phone number format:", licenseAgentNumber);
       return res.status(400).json({
         success: false,
@@ -211,146 +214,124 @@ router.post("/conference", async (req, res) => {
       });
     }
 
-    // Validate Twilio environment variables
-    if (!process.env.TWILIO_PHONE_NUMBER) {
-      console.error("ERROR: TWILIO_PHONE_NUMBER not configured");
+    // Validate environment variables
+    if (!process.env.TWILIO_PHONE_NUMBER || !process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+      console.error("ERROR: Missing Twilio configuration");
       return res.status(500).json({
         success: false,
-        error: "Twilio phone number not configured",
+        error: "Twilio configuration incomplete",
       });
     }
-
-    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
-      console.error("ERROR: Twilio credentials not configured");
-      return res.status(500).json({
-        success: false,
-        error: "Twilio credentials not configured",
-      });
-    }
-
-    console.log("Using Twilio phone number:", process.env.TWILIO_PHONE_NUMBER);
-    console.log(
-      "Twilio Account SID:",
-      process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + "..."
-    );
-    console.log(
-      "Twilio Auth Token:",
-      process.env.TWILIO_AUTH_TOKEN ? "SET" : "NOT SET"
-    );
 
     // Test Twilio client connection
     try {
       console.log("Testing Twilio client connection...");
-      // This will throw an error if the client is not properly configured
       await client.api.v2010.accounts(process.env.TWILIO_ACCOUNT_SID).fetch();
       console.log("Twilio client connection successful");
     } catch (twilioError) {
-      console.error("Twilio client connection failed:", twilioError.message);
+      console.error("Twilio client connection failed:", twilioError);
       return res.status(500).json({
         success: false,
         error: "Twilio client connection failed: " + twilioError.message,
       });
     }
 
-    // Case 1: There's an existing call to add to conference
+    // Case 1: Adding to existing call conference
     if (callSid) {
-      console.log("Case 1: Adding to existing call conference");
+      console.log("Case 1: Adding agent to existing call conference");
 
-      const conferenceRoom = `Room${callSid.slice(-8)}`; // Use last 8 chars of callSid
+      // Generate unique conference room name
+      const conferenceRoom = `ConferenceRoom_${callSid.slice(-8)}_${Date.now()}`;
       console.log("Conference room:", conferenceRoom);
 
-      // Create conference with hold music if enabled
-      let conferenceTwiML = `<Response>`;
+      try {
+        // First, move the existing call into conference
+        const conferenceUrl = holdMusicEnabled && holdMusicUrl ? 
+          `http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.wav` :
+          undefined;
 
-      if (holdMusicEnabled) {
-        const musicUrl =
-          holdMusicUrl ||
-          "http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.wav";
-        conferenceTwiML += `<Say>Adding ${
-          agentName || "license agent"
-        } to call. Please hold.</Say>`;
-        conferenceTwiML += `<Dial><Conference waitUrl="${musicUrl}" waitMethod="GET">${conferenceRoom}</Conference></Dial>`;
-      } else {
-        conferenceTwiML += `<Say>Adding ${
-          agentName || "license agent"
-        } to call...</Say>`;
-        conferenceTwiML += `<Dial><Conference>${conferenceRoom}</Conference></Dial>`;
+        const conferenceTwiML = new VoiceResponse();
+        conferenceTwiML.say(`Adding ${agentName || "license agent"} to the call. Please wait.`);
+        
+        const dial = conferenceTwiML.dial();
+        const conference = dial.conference(conferenceRoom, {
+          startConferenceOnEnter: true,
+          endConferenceOnExit: false,
+          waitUrl: conferenceUrl,
+          waitMethod: 'GET',
+          maxParticipants: 10
+        });
+
+        console.log("Generated conference TwiML:", conferenceTwiML.toString());
+
+        // Update existing call to join conference
+        console.log("Moving existing call to conference...");
+        const updatedCall = await client.calls(callSid).update({
+          twiml: conferenceTwiML.toString(),
+        });
+        
+        console.log("Existing call updated successfully, status:", updatedCall.status);
+
+        // Wait a moment for the first participant to join
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Create TwiML for agent to join the same conference
+        const agentTwiML = new VoiceResponse();
+        agentTwiML.say(`Hello ${agentName || "License Agent"}, joining conference call.`);
+        
+        const agentDial = agentTwiML.dial();
+        const agentConference = agentDial.conference(conferenceRoom, {
+          startConferenceOnEnter: true,
+          endConferenceOnExit: false,
+          maxParticipants: 10
+        });
+
+        console.log("Generated agent TwiML:", agentTwiML.toString());
+
+        // Call the license agent
+        console.log("Calling license agent to join conference...");
+        const agentCall = await client.calls.create({
+          to: cleanNumber,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          twiml: agentTwiML.toString(),
+        });
+
+        console.log("Agent call created successfully:", {
+          agentCallSid: agentCall.sid,
+          status: agentCall.status,
+          to: agentCall.to,
+        });
+
+        res.json({
+          success: true,
+          message: "Conference initiated successfully",
+          conferenceRoom: conferenceRoom,
+          agentCallSid: agentCall.sid,
+          originalCallSid: callSid,
+          agentCallStatus: agentCall.status
+        });
+
+      } catch (conferenceError) {
+        console.error("Conference creation error:", conferenceError);
+        throw new Error(`Failed to create conference: ${conferenceError.message}`);
       }
-
-      conferenceTwiML += `</Response>`;
-      console.log("Conference TwiML:", conferenceTwiML);
-
-      // Put current call into conference
-      console.log("Updating existing call with conference TwiML...");
-      await client.calls(callSid).update({
-        twiml: conferenceTwiML,
-      });
-      console.log("Successfully updated existing call");
-
-      // Call the license agent and add to same conference
-      const baseUrl =
-        process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-      const joinUrl = `${baseUrl}/twilio/join-conference?room=${conferenceRoom}&holdMusic=${holdMusicEnabled}&musicUrl=${encodeURIComponent(
-        holdMusicUrl || ""
-      )}`;
-
-      console.log("Creating agent call with URL:", joinUrl);
-
-      console.log("Creating agent call for conference with config:", {
-        to: licenseAgentNumber,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        url: joinUrl,
-      });
-
-      const agentCall = await client.calls.create({
-        to: licenseAgentNumber,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        url: joinUrl,
-      });
-
-      console.log("Conference initiated successfully:", {
-        agentCallSid: agentCall.sid,
-        status: agentCall.status,
-        conferenceRoom: conferenceRoom,
-      });
-
-      res.json({
-        success: true,
-        message: "Conference initiated",
-        conferenceRoom: conferenceRoom,
-        agentCallSid: agentCall.sid,
-        originalCallSid: callSid,
-      });
     }
-    // Case 2: No existing call - make a direct call to license agent
+    // Case 2: Direct call to license agent (no existing call)
     else {
       console.log("Case 2: Making direct call to license agent");
 
-      // For direct calls without a publicly accessible webhook, we'll use inline TwiML
-      // that just connects the agent with a greeting
-      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say voice="alice">Hello ${
-    agentName || "License Agent"
-  }, you are receiving a direct call from the dialer system.</Say>
-  <Pause length="1"/>
-  <Say voice="alice">This call was initiated by a license agent button.</Say>
-</Response>`;
+      const directTwiML = new VoiceResponse();
+      directTwiML.say(`Hello ${agentName || "License Agent"}, you have an incoming call from the dialer system.`);
+      directTwiML.pause({ length: 1 });
+      directTwiML.say("This is a direct call initiated by the license agent button.");
 
-      console.log("Creating direct agent call with inline TwiML...");
-      console.log("Agent phone number:", licenseAgentNumber);
-      console.log("From phone number:", process.env.TWILIO_PHONE_NUMBER);
-
-      console.log("Creating direct agent call with config:", {
-        to: licenseAgentNumber,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        twiml: "inline TwiML response",
-      });
+      console.log("Creating direct agent call...");
+      console.log("Direct call TwiML:", directTwiML.toString());
 
       const agentCall = await client.calls.create({
-        to: licenseAgentNumber,
+        to: cleanNumber,
         from: process.env.TWILIO_PHONE_NUMBER,
-        twiml: twimlResponse,
+        twiml: directTwiML.toString(),
       });
 
       console.log("Direct call created successfully:", {
@@ -365,33 +346,43 @@ router.post("/conference", async (req, res) => {
         message: `Direct call initiated to ${agentName || "license agent"}`,
         agentCallSid: agentCall.sid,
         type: "direct",
+        agentCallStatus: agentCall.status
       });
     }
-  } catch (e) {
+
+  } catch (error) {
     console.error("=== CONFERENCE ERROR DEBUG ===");
-    console.error("Error message:", e.message);
-    console.error("Error stack:", e.stack);
-    console.error("Error details:", e);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    console.error("Error type:", error.constructor.name);
+    console.error("Twilio Error Code:", error.code);
+    console.error("Twilio Error Status:", error.status);
     console.error("==============================");
 
+    // Send detailed error response
     res.status(500).json({
       success: false,
-      error: e.message,
-      details: process.env.NODE_ENV === "development" ? e.stack : undefined,
+      error: error.message,
+      errorType: error.constructor.name,
+      twilioCode: error.code || null,
+      twilioStatus: error.status || null,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
 
 // TwiML for direct agent calls
 router.all("/agent-direct-call", (req, res) => {
+  console.log("=== AGENT DIRECT CALL ENDPOINT ===");
+  console.log("Query params:", req.query);
+  console.log("Body:", req.body);
+
   const agentName = req.query.agentName || "License Agent";
 
-  const vr = new twilio.twiml.VoiceResponse();
-  vr.say(
-    `Hello ${agentName}, you have an incoming call from the dialer system.`
-  );
+  const vr = new VoiceResponse();
+  vr.say(`Hello ${agentName}, you are connected to a direct call from the dialer system.`);
 
-  console.log("Direct agent call TwiML:", vr.toString());
+  console.log("Generated TwiML for agent direct call:", vr.toString());
   res.type("text/xml").send(vr.toString());
 });
 
@@ -608,23 +599,6 @@ router.use((error, req, res, next) => {
     error: "Internal server error",
     details: process.env.NODE_ENV === "development" ? error.message : undefined,
   });
-});
-
-// Agent direct call TwiML endpoint
-router.post("/agent-direct-call", (req, res) => {
-  console.log("=== AGENT DIRECT CALL ENDPOINT ===");
-  console.log("Query params:", req.query);
-  console.log("Body:", req.body);
-
-  const agentName = req.query.agentName || "License Agent";
-
-  const vr = new VoiceResponse();
-  vr.say(
-    `Hello ${agentName}, you are connected to a direct call from the dialer system.`
-  );
-
-  console.log("Generated TwiML for agent direct call:", vr.toString());
-  res.type("text/xml").send(vr.toString());
 });
 
 // End Client Call - Remove client from conference
