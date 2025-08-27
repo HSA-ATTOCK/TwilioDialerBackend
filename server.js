@@ -21,7 +21,7 @@ app.use(
       process.env.FRONTEND_URL, // specific frontend URL from env
     ].filter(Boolean), // Remove undefined values
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -35,10 +35,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Important for Twilio webhooks
 
 // Import routes
-const { router: authRouter, verifyToken } = require("./routes/auth");
+const { router: authRouter, authMiddleware } = require("./routes/auth");
 const twilioRouter = require("./routes/twilio");
 const dialRouter = require("./routes/dial");
 const recordingRouter = require("./routes/recording");
+const organizationRouter = require("./routes/organization");
+const platformAdminRouter = require("./routes/platformAdmin");
 
 // Database connection
 mongoose
@@ -74,9 +76,11 @@ app.get("/health", (req, res) => {
 
 // API Routes
 app.use("/auth", authRouter);
+app.use("/organization", organizationRouter);
+app.use("/platform-admin", platformAdminRouter); // Platform admin routes
 app.use("/twilio", twilioRouter); // No authentication required for Twilio webhooks
-app.use("/dial", verifyToken, dialRouter); // Protected routes for dial operations
-app.use("/recording", verifyToken, recordingRouter); // Protected routes for recording operations
+app.use("/dial", authMiddleware, dialRouter); // Protected routes for dial operations
+app.use("/recording", authMiddleware, recordingRouter); // Protected routes for recording operations
 
 // Test endpoint
 app.get("/test", (req, res) => {
