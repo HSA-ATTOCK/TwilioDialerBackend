@@ -57,7 +57,7 @@ router.get("/debug-env", (req, res) => {
 });
 
 // Access Token for Voice SDK v2 (PRIMARY ENDPOINT)
-router.get("/access-token", (req, res) => {
+router.get("/access-token", async (req, res) => {
   try {
     if (missingEnvVars.length > 0) {
       throw new Error(
@@ -69,15 +69,77 @@ router.get("/access-token", (req, res) => {
 
     console.log("=== ACCESS TOKEN DEBUG ===");
     console.log("Generating access token for identity:", identity);
-    console.log("Account SID:", process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + "...");
-    console.log("API Key:", process.env.TWILIO_API_KEY?.substring(0, 10) + "...");
-    console.log("API Secret:", process.env.TWILIO_API_SECRET ? "SET" : "MISSING");
-    console.log("TwiML App SID:", process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "...");
+    console.log(
+      "Account SID:",
+      process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + "..."
+    );
+    console.log(
+      "API Key:",
+      process.env.TWILIO_API_KEY?.substring(0, 10) + "..."
+    );
+    console.log(
+      "API Secret:",
+      process.env.TWILIO_API_SECRET ? "SET" : "MISSING"
+    );
+    console.log(
+      "TwiML App SID:",
+      process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "..."
+    );
     console.log("Region:", process.env.TWILIO_REGION || "ie1");
     console.log("Edge:", process.env.TWILIO_EDGE || "dublin");
+
+    // 🔍 VALIDATE TWIML APP EXISTS
+    try {
+      console.log("🔍 Validating TwiML Application...");
+      const twimlApp = await client
+        .applications(process.env.TWILIO_TWIML_APP_SID)
+        .fetch();
+      console.log("✅ TwiML App found:", {
+        sid: twimlApp.sid,
+        friendlyName: twimlApp.friendlyName,
+        voiceUrl: twimlApp.voiceUrl,
+        voiceMethod: twimlApp.voiceMethod,
+      });
+    } catch (twimlError) {
+      console.error("❌ TwiML App validation failed:", twimlError.message);
+      return res.status(500).json({
+        error: "TwiML Application not found or invalid",
+        details: `TwiML App ${process.env.TWILIO_TWIML_APP_SID} does not exist or is not accessible`,
+        twimlAppSid: process.env.TWILIO_TWIML_APP_SID,
+      });
+    }
+
+    // 🔍 VALIDATE API KEY
+    try {
+      console.log("🔍 Validating API Key...");
+      const apiKey = await client.keys(process.env.TWILIO_API_KEY).fetch();
+      console.log("✅ API Key found:", {
+        sid: apiKey.sid,
+        friendlyName: apiKey.friendlyName,
+      });
+    } catch (apiKeyError) {
+      console.error("❌ API Key validation failed:", apiKeyError.message);
+      return res.status(500).json({
+        error: "API Key not found or invalid",
+        details: `API Key ${process.env.TWILIO_API_KEY} does not exist or is not accessible`,
+        apiKey: process.env.TWILIO_API_KEY,
+      });
+    }
+
     console.log("==========================");
 
-    // Create AccessToken
+    // 🔧 FIXED: Simplified timestamp generation for JWT (UTC-based)
+    const now = Math.floor(Date.now() / 1000); // Current UTC time in seconds
+
+    console.log("🕒 Timestamp Debug (UTC):");
+    console.log("Current time (seconds):", now);
+    console.log("Current date (UTC):", new Date(now * 1000).toISOString());
+    console.log(
+      "Server timezone offset (minutes):",
+      new Date().getTimezoneOffset()
+    );
+
+    // Create AccessToken with simplified timestamp control - let Twilio SDK handle timestamps
     const token = new AccessToken(
       process.env.TWILIO_ACCOUNT_SID,
       process.env.TWILIO_API_KEY,
@@ -85,6 +147,8 @@ router.get("/access-token", (req, res) => {
       {
         identity: identity,
         ttl: 3600, // 1 hour
+        // Remove explicit timestamp control - let Twilio SDK handle it
+        // This prevents future timestamp issues
       }
     );
 
@@ -101,9 +165,62 @@ router.get("/access-token", (req, res) => {
 
     const jwtToken = token.toJwt();
 
-    console.log("Access token generated successfully");
+    console.log("✅ Access token generated successfully");
     console.log("JWT Token length:", jwtToken.length);
     console.log("Token starts with:", jwtToken.substring(0, 20) + "...");
+
+    // 🔍 DECODE AND VERIFY JWT PAYLOAD
+    try {
+      const base64Payload = jwtToken.split(".")[1];
+      const decodedPayload = JSON.parse(
+        Buffer.from(base64Payload, "base64").toString()
+      );
+      console.log("🔍 JWT Payload Debug:");
+      console.log(
+        "iat (issued at):",
+        decodedPayload.iat,
+        "->",
+        new Date(decodedPayload.iat * 1000).toISOString()
+      );
+      console.log(
+        "exp (expires):",
+        decodedPayload.exp,
+        "->",
+        new Date(decodedPayload.exp * 1000).toISOString()
+      );
+      if (decodedPayload.nbf) {
+        console.log(
+          "nbf (not before):",
+          decodedPayload.nbf,
+          "->",
+          new Date(decodedPayload.nbf * 1000).toISOString()
+        );
+      }
+      console.log(
+        "Current time:",
+        now,
+        "->",
+        new Date(now * 1000).toISOString()
+      );
+
+      // Check if token is valid timing-wise
+      if (decodedPayload.iat > now + 300) {
+        // If issued time is more than 5 minutes in the future
+        console.error(
+          "❌ TOKEN ISSUED IN THE FUTURE! This will cause JWT invalid error"
+        );
+        console.error("Token iat:", decodedPayload.iat, "Current time:", now);
+      } else if (decodedPayload.exp < now) {
+        console.error("❌ TOKEN ALREADY EXPIRED!");
+      } else {
+        console.log("✅ Token timestamps look correct");
+      }
+    } catch (decodeError) {
+      console.error(
+        "❌ Failed to decode JWT for debugging:",
+        decodeError.message
+      );
+    }
 
     res.json({
       token: jwtToken,
@@ -127,11 +244,62 @@ router.get("/access-token", (req, res) => {
     console.error("Error stack:", e.stack);
     console.error("Missing vars:", missingEnvVars);
     console.error("==========================");
-    
+
     res.status(500).json({
       error: "Failed to generate access token",
       details: e.message,
       missingVars: missingEnvVars,
+    });
+  }
+});
+
+// Backup simple token endpoint - minimal configuration
+router.get("/access-token-simple", async (req, res) => {
+  try {
+    if (missingEnvVars.length > 0) {
+      throw new Error(
+        `Missing required environment variables: ${missingEnvVars.join(", ")}`
+      );
+    }
+
+    const identity = "browser";
+
+    console.log("=== SIMPLE TOKEN GENERATION ===");
+    console.log("Current server time:", new Date().toISOString());
+    console.log("Current UTC timestamp:", Math.floor(Date.now() / 1000));
+
+    // Simple token generation - let Twilio SDK handle all timestamps
+    const token = new AccessToken(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_KEY,
+      process.env.TWILIO_API_SECRET
+    );
+
+    token.identity = identity;
+
+    const voiceGrant = new VoiceGrant({
+      outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID,
+      incomingAllow: true,
+    });
+
+    token.addGrant(voiceGrant);
+
+    const jwtToken = token.toJwt();
+
+    console.log("✅ Simple token generated");
+    console.log("=================================");
+
+    res.json({
+      token: jwtToken,
+      identity: identity,
+      method: "simple",
+      serverTime: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error("Simple token generation failed:", e.message);
+    res.status(500).json({
+      error: "Failed to generate simple access token",
+      details: e.message,
     });
   }
 });
