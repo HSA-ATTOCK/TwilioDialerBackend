@@ -56,7 +56,7 @@ router.get("/debug-env", (req, res) => {
   });
 });
 
-// Access Token for Voice SDK v2 (PRIMARY ENDPOINT)
+// FIXED: Access Token for Voice SDK v2 - Ireland Region Compatible
 router.get("/access-token", async (req, res) => {
   try {
     if (missingEnvVars.length > 0) {
@@ -85,38 +85,31 @@ router.get("/access-token", async (req, res) => {
       "TwiML App SID:",
       process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "..."
     );
-    console.log("Region:", process.env.TWILIO_REGION || "ie1");
-    console.log("Edge:", process.env.TWILIO_EDGE || "dublin");
 
-    // 🔍 VALIDATE TWIML APP EXISTS (TEMPORARILY DISABLED)
-    console.log("⚠️ Skipping TwiML App validation to fix immediate token issue");
-    console.log("TwiML App SID being used:", process.env.TWILIO_TWIML_APP_SID);
-    
-    /* TEMPORARILY COMMENTED OUT - RE-ENABLE AFTER CREATING VALID TWIML APP
+    // � FIXED: Validate TwiML App exists first
+    console.log("🔍 Validating TwiML Application...");
     try {
-      console.log("🔍 Validating TwiML Application...");
       const twimlApp = await client
         .applications(process.env.TWILIO_TWIML_APP_SID)
         .fetch();
-      console.log("✅ TwiML App found:", {
+      console.log("✅ TwiML App validated:", {
         sid: twimlApp.sid,
         friendlyName: twimlApp.friendlyName,
         voiceUrl: twimlApp.voiceUrl,
-        voiceMethod: twimlApp.voiceMethod,
       });
     } catch (twimlError) {
       console.error("❌ TwiML App validation failed:", twimlError.message);
       return res.status(500).json({
         error: "TwiML Application not found or invalid",
         details: `TwiML App ${process.env.TWILIO_TWIML_APP_SID} does not exist or is not accessible`,
+        suggestion: "Create a new TwiML app using the /create-twiml-app endpoint",
         twimlAppSid: process.env.TWILIO_TWIML_APP_SID,
       });
     }
-    */
 
-    // 🔍 VALIDATE API KEY
+    // � FIXED: Validate API Key exists and is active
+    console.log("🔍 Validating API Key...");
     try {
-      console.log("🔍 Validating API Key...");
       const apiKey = await client.keys(process.env.TWILIO_API_KEY).fetch();
       console.log("✅ API Key found:", {
         sid: apiKey.sid,
@@ -126,25 +119,22 @@ router.get("/access-token", async (req, res) => {
       console.error("❌ API Key validation failed:", apiKeyError.message);
       return res.status(500).json({
         error: "API Key not found or invalid",
-        details: `API Key ${process.env.TWILIO_API_KEY} does not exist or is not accessible`,
-        apiKey: process.env.TWILIO_API_KEY,
+        details: apiKeyError.message,
+        apiKeySid: process.env.TWILIO_API_KEY,
       });
     }
 
     console.log("==========================");
 
-    // 🔧 FIXED: Simplified timestamp generation for JWT (UTC-based)
-    const now = Math.floor(Date.now() / 1000); // Current UTC time in seconds
+    // 🔧 FIXED: Simple timestamp generation
+    const now = Math.floor(Date.now() / 1000);
 
     console.log("🕒 Timestamp Debug (UTC):");
     console.log("Current time (seconds):", now);
     console.log("Current date (UTC):", new Date(now * 1000).toISOString());
-    console.log(
-      "Server timezone offset (minutes):",
-      new Date().getTimezoneOffset()
-    );
 
-    // Create AccessToken with simplified timestamp control - let Twilio SDK handle timestamps
+    // 🔧 FIXED: Create AccessToken without region/edge in VoiceGrant
+    // Region/edge should be handled on the client side (Dialer.js), not in JWT
     const token = new AccessToken(
       process.env.TWILIO_ACCOUNT_SID,
       process.env.TWILIO_API_KEY,
@@ -152,18 +142,18 @@ router.get("/access-token", async (req, res) => {
       {
         identity: identity,
         ttl: 3600, // 1 hour
-        // Remove explicit timestamp control - let Twilio SDK handle it
-        // This prevents future timestamp issues
+        // Let Twilio SDK handle timestamps automatically
       }
     );
 
-    // Add Voice Grant with proper configuration and regional optimization
+    // 🔧 FIXED: Simplified Voice Grant - Remove region/edge from JWT
+    // The region/edge should be configured in the client-side Device initialization
     const voiceGrant = new VoiceGrant({
       outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID, // For outgoing calls
       incomingAllow: true, // Allow incoming calls
-      // 🚀 UPDATED FOR IRELAND REGION
-      region: process.env.TWILIO_REGION || "ie1", // Ireland region for your new credentials
-      edge: process.env.TWILIO_EDGE || "dublin", // Dublin edge for Ireland region
+      // ❌ REMOVED: region and edge from VoiceGrant - these belong in Device options
+      // region: process.env.TWILIO_REGION || "ie1", 
+      // edge: process.env.TWILIO_EDGE || "dublin",
     });
 
     token.addGrant(voiceGrant);
@@ -193,14 +183,6 @@ router.get("/access-token", async (req, res) => {
         "->",
         new Date(decodedPayload.exp * 1000).toISOString()
       );
-      if (decodedPayload.nbf) {
-        console.log(
-          "nbf (not before):",
-          decodedPayload.nbf,
-          "->",
-          new Date(decodedPayload.nbf * 1000).toISOString()
-        );
-      }
       console.log(
         "Current time:",
         now,
@@ -210,16 +192,26 @@ router.get("/access-token", async (req, res) => {
 
       // Check if token is valid timing-wise
       if (decodedPayload.iat > now + 300) {
-        // If issued time is more than 5 minutes in the future
         console.error(
           "❌ TOKEN ISSUED IN THE FUTURE! This will cause JWT invalid error"
         );
-        console.error("Token iat:", decodedPayload.iat, "Current time:", now);
+        return res.status(500).json({
+          error: "Token timestamp issue",
+          details: "Token issued in the future"
+        });
       } else if (decodedPayload.exp < now) {
         console.error("❌ TOKEN ALREADY EXPIRED!");
+        return res.status(500).json({
+          error: "Token timestamp issue", 
+          details: "Token already expired"
+        });
       } else {
         console.log("✅ Token timestamps look correct");
       }
+
+      // 🔍 Debug the grants structure
+      console.log("🔍 JWT Grants:", JSON.stringify(decodedPayload.grants, null, 2));
+      
     } catch (decodeError) {
       console.error(
         "❌ Failed to decode JWT for debugging:",
@@ -235,8 +227,11 @@ router.get("/access-token", async (req, res) => {
         accountSid: process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + "...",
         apiKey: process.env.TWILIO_API_KEY?.substring(0, 10) + "...",
         twimlAppSid: process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "...",
-        region: process.env.TWILIO_REGION || "ie1",
-        edge: process.env.TWILIO_EDGE || "dublin",
+        // Region/edge info for client-side use
+        recommendedDeviceOptions: {
+          region: process.env.TWILIO_REGION || "ie1",
+          edge: process.env.TWILIO_EDGE || "dublin"
+        },
         grants: {
           outgoing: true,
           incoming: true,
@@ -315,18 +310,31 @@ router.get("/access-token-debug", async (req, res) => {
   try {
     console.log("=== DEBUG TOKEN GENERATION ===");
     console.log("Environment variables check:");
-    console.log("ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID ? "SET" : "MISSING");
+    console.log(
+      "ACCOUNT_SID:",
+      process.env.TWILIO_ACCOUNT_SID ? "SET" : "MISSING"
+    );
     console.log("API_KEY:", process.env.TWILIO_API_KEY ? "SET" : "MISSING");
-    console.log("API_SECRET:", process.env.TWILIO_API_SECRET ? "SET" : "MISSING");
-    console.log("TWIML_APP_SID:", process.env.TWILIO_TWIML_APP_SID ? "SET" : "MISSING");
+    console.log(
+      "API_SECRET:",
+      process.env.TWILIO_API_SECRET ? "SET" : "MISSING"
+    );
+    console.log(
+      "TWIML_APP_SID:",
+      process.env.TWILIO_TWIML_APP_SID ? "SET" : "MISSING"
+    );
 
     // Basic validation only
-    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_API_KEY || !process.env.TWILIO_API_SECRET) {
+    if (
+      !process.env.TWILIO_ACCOUNT_SID ||
+      !process.env.TWILIO_API_KEY ||
+      !process.env.TWILIO_API_SECRET
+    ) {
       throw new Error("Missing basic Twilio credentials");
     }
 
     const identity = "browser";
-    
+
     // Minimal token generation with no external API calls
     const token = new AccessToken(
       process.env.TWILIO_ACCOUNT_SID,
@@ -373,13 +381,14 @@ router.get("/access-token-debug", async (req, res) => {
 router.post("/create-twiml-app", async (req, res) => {
   try {
     console.log("=== CREATING NEW TWIML APP ===");
-    
-    const baseUrl = process.env.BASE_URL || 'https://twiliodialerbackend.onrender.com';
-    
+
+    const baseUrl =
+      process.env.BASE_URL || "https://twiliodialerbackend.onrender.com";
+
     const application = await client.applications.create({
-      friendlyName: 'Twilio Dialer Voice App',
+      friendlyName: "Twilio Dialer Voice App",
       voiceUrl: `${baseUrl}/twilio/outbound-twiml`,
-      voiceMethod: 'POST',
+      voiceMethod: "POST",
     });
 
     console.log("✅ TwiML Application created:", {
