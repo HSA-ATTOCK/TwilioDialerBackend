@@ -88,7 +88,11 @@ router.get("/access-token", async (req, res) => {
     console.log("Region:", process.env.TWILIO_REGION || "ie1");
     console.log("Edge:", process.env.TWILIO_EDGE || "dublin");
 
-    // 🔍 VALIDATE TWIML APP EXISTS
+    // 🔍 VALIDATE TWIML APP EXISTS (TEMPORARILY DISABLED)
+    console.log("⚠️ Skipping TwiML App validation to fix immediate token issue");
+    console.log("TwiML App SID being used:", process.env.TWILIO_TWIML_APP_SID);
+    
+    /* TEMPORARILY COMMENTED OUT - RE-ENABLE AFTER CREATING VALID TWIML APP
     try {
       console.log("🔍 Validating TwiML Application...");
       const twimlApp = await client
@@ -108,6 +112,7 @@ router.get("/access-token", async (req, res) => {
         twimlAppSid: process.env.TWILIO_TWIML_APP_SID,
       });
     }
+    */
 
     // 🔍 VALIDATE API KEY
     try {
@@ -272,10 +277,11 @@ router.get("/access-token-simple", async (req, res) => {
     const token = new AccessToken(
       process.env.TWILIO_ACCOUNT_SID,
       process.env.TWILIO_API_KEY,
-      process.env.TWILIO_API_SECRET
+      process.env.TWILIO_API_SECRET,
+      {
+        identity: identity, // Fix: specify identity in options
+      }
     );
-
-    token.identity = identity;
 
     const voiceGrant = new VoiceGrant({
       outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID,
@@ -325,10 +331,11 @@ router.get("/access-token-debug", async (req, res) => {
     const token = new AccessToken(
       process.env.TWILIO_ACCOUNT_SID,
       process.env.TWILIO_API_KEY,
-      process.env.TWILIO_API_SECRET
+      process.env.TWILIO_API_SECRET,
+      {
+        identity: identity, // Fix: specify identity in options
+      }
     );
-
-    token.identity = identity;
 
     // Basic voice grant without external validation
     const voiceGrant = new VoiceGrant({
@@ -358,6 +365,43 @@ router.get("/access-token-debug", async (req, res) => {
       error: "Failed to generate debug access token",
       details: e.message,
       stack: e.stack,
+    });
+  }
+});
+
+// Helper endpoint to create a new TwiML Application
+router.post("/create-twiml-app", async (req, res) => {
+  try {
+    console.log("=== CREATING NEW TWIML APP ===");
+    
+    const baseUrl = process.env.BASE_URL || 'https://twiliodialerbackend.onrender.com';
+    
+    const application = await client.applications.create({
+      friendlyName: 'Twilio Dialer Voice App',
+      voiceUrl: `${baseUrl}/twilio/outbound-twiml`,
+      voiceMethod: 'POST',
+    });
+
+    console.log("✅ TwiML Application created:", {
+      sid: application.sid,
+      friendlyName: application.friendlyName,
+      voiceUrl: application.voiceUrl,
+    });
+
+    res.json({
+      success: true,
+      twimlApp: {
+        sid: application.sid,
+        friendlyName: application.friendlyName,
+        voiceUrl: application.voiceUrl,
+      },
+      instructions: `Update your .env file with: TWILIO_TWIML_APP_SID=${application.sid}`,
+    });
+  } catch (e) {
+    console.error("Failed to create TwiML Application:", e.message);
+    res.status(500).json({
+      error: "Failed to create TwiML Application",
+      details: e.message,
     });
   }
 });
