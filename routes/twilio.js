@@ -102,7 +102,8 @@ router.get("/access-token", async (req, res) => {
       return res.status(500).json({
         error: "TwiML Application not found or invalid",
         details: `TwiML App ${process.env.TWILIO_TWIML_APP_SID} does not exist or is not accessible`,
-        suggestion: "Create a new TwiML app using the /create-twiml-app endpoint",
+        suggestion:
+          "Create a new TwiML app using the /create-twiml-app endpoint",
         twimlAppSid: process.env.TWILIO_TWIML_APP_SID,
       });
     }
@@ -152,8 +153,8 @@ router.get("/access-token", async (req, res) => {
       outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID, // For outgoing calls
       incomingAllow: true, // Allow incoming calls
       // ❌ REMOVED: region and edge from VoiceGrant - these belong in Device options
-      // region: process.env.TWILIO_REGION || "ie1", 
-      // edge: process.env.TWILIO_EDGE || "dublin",
+      // region: process.env.TWILIO_REGION || "us1",
+      // edge: process.env.TWILIO_EDGE || "singapore",
     });
 
     token.addGrant(voiceGrant);
@@ -197,21 +198,23 @@ router.get("/access-token", async (req, res) => {
         );
         return res.status(500).json({
           error: "Token timestamp issue",
-          details: "Token issued in the future"
+          details: "Token issued in the future",
         });
       } else if (decodedPayload.exp < now) {
         console.error("❌ TOKEN ALREADY EXPIRED!");
         return res.status(500).json({
-          error: "Token timestamp issue", 
-          details: "Token already expired"
+          error: "Token timestamp issue",
+          details: "Token already expired",
         });
       } else {
         console.log("✅ Token timestamps look correct");
       }
 
       // 🔍 Debug the grants structure
-      console.log("🔍 JWT Grants:", JSON.stringify(decodedPayload.grants, null, 2));
-      
+      console.log(
+        "🔍 JWT Grants:",
+        JSON.stringify(decodedPayload.grants, null, 2)
+      );
     } catch (decodeError) {
       console.error(
         "❌ Failed to decode JWT for debugging:",
@@ -229,8 +232,8 @@ router.get("/access-token", async (req, res) => {
         twimlAppSid: process.env.TWILIO_TWIML_APP_SID?.substring(0, 10) + "...",
         // Region/edge info for client-side use
         recommendedDeviceOptions: {
-          region: process.env.TWILIO_REGION || "ie1",
-          edge: process.env.TWILIO_EDGE || "dublin"
+          region: process.env.TWILIO_REGION || "us1",
+          edge: process.env.TWILIO_EDGE || "singapore",
         },
         grants: {
           outgoing: true,
