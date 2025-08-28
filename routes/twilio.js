@@ -304,6 +304,64 @@ router.get("/access-token-simple", async (req, res) => {
   }
 });
 
+// Ultra-simple token endpoint - bypass all validations (for debugging)
+router.get("/access-token-debug", async (req, res) => {
+  try {
+    console.log("=== DEBUG TOKEN GENERATION ===");
+    console.log("Environment variables check:");
+    console.log("ACCOUNT_SID:", process.env.TWILIO_ACCOUNT_SID ? "SET" : "MISSING");
+    console.log("API_KEY:", process.env.TWILIO_API_KEY ? "SET" : "MISSING");
+    console.log("API_SECRET:", process.env.TWILIO_API_SECRET ? "SET" : "MISSING");
+    console.log("TWIML_APP_SID:", process.env.TWILIO_TWIML_APP_SID ? "SET" : "MISSING");
+
+    // Basic validation only
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_API_KEY || !process.env.TWILIO_API_SECRET) {
+      throw new Error("Missing basic Twilio credentials");
+    }
+
+    const identity = "browser";
+    
+    // Minimal token generation with no external API calls
+    const token = new AccessToken(
+      process.env.TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_KEY,
+      process.env.TWILIO_API_SECRET
+    );
+
+    token.identity = identity;
+
+    // Basic voice grant without external validation
+    const voiceGrant = new VoiceGrant({
+      outgoingApplicationSid: process.env.TWILIO_TWIML_APP_SID || "PLACEHOLDER",
+      incomingAllow: true,
+    });
+
+    token.addGrant(voiceGrant);
+
+    const jwtToken = token.toJwt();
+
+    console.log("✅ Debug token generated successfully");
+    console.log("Token length:", jwtToken.length);
+    console.log("===================================");
+
+    res.json({
+      token: jwtToken,
+      identity: identity,
+      method: "debug",
+      serverTime: new Date().toISOString(),
+      timestamp: Math.floor(Date.now() / 1000),
+    });
+  } catch (e) {
+    console.error("Debug token generation failed:", e.message);
+    console.error("Stack:", e.stack);
+    res.status(500).json({
+      error: "Failed to generate debug access token",
+      details: e.message,
+      stack: e.stack,
+    });
+  }
+});
+
 // TwiML for outbound calls - What happens when Twilio processes the call
 router.all("/outbound-twiml", (req, res) => {
   const to = req.body.To || req.query.to;
